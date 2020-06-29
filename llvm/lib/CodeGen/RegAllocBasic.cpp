@@ -35,95 +35,14 @@
 #include "llvm/Support/raw_ostream.h"
 #include <cstdlib>
 #include <queue>
-
-using namespace llvm;
+#include "RegAllocBasic.h"
 
 #define DEBUG_TYPE "regalloc"
 
 static RegisterRegAlloc basicRegAlloc("basic", "basic register allocator",
                                       createBasicRegisterAllocator);
 
-namespace {
-  struct CompSpillWeight {
-    bool operator()(LiveInterval *A, LiveInterval *B) const {
-      return A->weight < B->weight;
-    }
-  };
-}
-
-namespace {
-/// RABasic provides a minimal implementation of the basic register allocation
-/// algorithm. It prioritizes live virtual registers by spill weight and spills
-/// whenever a register is unavailable. This is not practical in production but
-/// provides a useful baseline both for measuring other allocators and comparing
-/// the speed of the basic algorithm against other styles of allocators.
-class RABasic : public MachineFunctionPass,
-                public RegAllocBase,
-                private LiveRangeEdit::Delegate {
-  // context
-  MachineFunction *MF;
-
-  // state
-  std::unique_ptr<Spiller> SpillerInstance;
-  std::priority_queue<LiveInterval*, std::vector<LiveInterval*>,
-                      CompSpillWeight> Queue;
-
-  // Scratch space.  Allocated here to avoid repeated malloc calls in
-  // selectOrSplit().
-  BitVector UsableRegs;
-
-  bool LRE_CanEraseVirtReg(unsigned) override;
-  void LRE_WillShrinkVirtReg(unsigned) override;
-
-public:
-  RABasic();
-
-  /// Return the pass name.
-  StringRef getPassName() const override { return "Basic Register Allocator"; }
-
-  /// RABasic analysis usage.
-  void getAnalysisUsage(AnalysisUsage &AU) const override;
-
-  void releaseMemory() override;
-
-  Spiller &spiller() override { return *SpillerInstance; }
-
-  void enqueue(LiveInterval *LI) override {
-    Queue.push(LI);
-  }
-
-  LiveInterval *dequeue() override {
-    if (Queue.empty())
-      return nullptr;
-    LiveInterval *LI = Queue.top();
-    Queue.pop();
-    return LI;
-  }
-
-  unsigned selectOrSplit(LiveInterval &VirtReg,
-                         SmallVectorImpl<unsigned> &SplitVRegs) override;
-
-  /// Perform register allocation.
-  bool runOnMachineFunction(MachineFunction &mf) override;
-
-  MachineFunctionProperties getRequiredProperties() const override {
-    return MachineFunctionProperties().set(
-        MachineFunctionProperties::Property::NoPHIs);
-  }
-
-  // Helper for spilling all live virtual registers currently unified under preg
-  // that interfere with the most recently queried lvr.  Return true if spilling
-  // was successful, and append any new spilled/split intervals to splitLVRs.
-  bool spillInterferences(LiveInterval &VirtReg, unsigned PhysReg,
-                          SmallVectorImpl<unsigned> &SplitVRegs);
-
-  static char ID;
-};
-
 char RABasic::ID = 0;
-
-} // end anonymous namespace
-
 char &llvm::RABasicID = RABasic::ID;
 
 INITIALIZE_PASS_BEGIN(RABasic, "regallocbasic", "Basic Register Allocator",
@@ -303,6 +222,7 @@ unsigned RABasic::selectOrSplit(LiveInterval &VirtReg,
 }
 
 bool RABasic::runOnMachineFunction(MachineFunction &mf) {
+  errs() << "[BASIC REGISTER ALLOCATION]\n";
   LLVM_DEBUG(dbgs() << "********** BASIC REGISTER ALLOCATION **********\n"
                     << "********** Function: " << mf.getName() << '\n');
 
@@ -316,6 +236,32 @@ bool RABasic::runOnMachineFunction(MachineFunction &mf) {
                                 getAnalysis<MachineBlockFrequencyInfo>());
 
   SpillerInstance.reset(createInlineSpiller(*this, *MF, *VRM));
+
+  allocatePhysRegs();
+  postOptimization();
+
+  // Diagnostic output before rewriting
+  LLVM_DEBUG(dbgs() << "Post alloc VirtRegMap:\n" << *VRM << "\n");
+
+  releaseMemory();
+  return true;
+}
+
+bool RABasic::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, LiveIntervals &lis, LiveRegMatrix &matrix, MachineLoopInfo* loops, MachineBlockFrequencyInfo *mbfi, Spiller* spiller) {
+  errs() << "[BASIC REGISTER ALLOCATION]\n";
+  LLVM_DEBUG(dbgs() << "********** BASIC REGISTER ALLOCATION **********\n"
+                    << "********** Function: " << mf.getName() << '\n');
+
+  MF = &mf;
+  RegAllocBase::init(vrm,
+                     lis,
+                     matrix);
+
+  calculateSpillWeightsAndHints(*LIS, *MF, VRM,
+                                *loops,
+                                *mbfi);
+
+  SpillerInstance.reset(spiller);
 
   allocatePhysRegs();
   postOptimization();

@@ -56,6 +56,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/CodeGen/RegisterClassInfo.h"
 #include "RegAllocGreedy.h"
+#include "RegAllocBasic.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -126,6 +127,13 @@ static cl::opt<bool>
 PP2DummySkip("pp2-skip",
                cl::desc("Skip MIS coloring"),
                cl::init(false), cl::NotHidden);
+#endif
+
+#ifndef NDEBUG
+static cl::opt<std::string>
+PP2DummyRegAlloc("pp2-regalloc",
+               cl::desc("Select register allocator for residual graph"),
+               cl::init("greedy"), cl::NotHidden);
 #endif
 
 namespace {
@@ -275,7 +283,13 @@ void PP2Dummy::coloring(PP2::Graph &G, std::string ExportGraphFileName) {
   if (!PP2DummySkip) {
     coloringMIS(G, ExportGraphFileName);
   }
-  (new RAGreedy())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Indexes, MBFI, DomTree, ORE, Loops, Bundles, SpillPlacer, DebugVars, AA, spiller);
+  if (!PP2DummyRegAlloc.compare("greedy")) {
+    (new RAGreedy())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Indexes, MBFI, DomTree, ORE, Loops, Bundles, SpillPlacer, DebugVars, AA, spiller);
+  } else if (!PP2DummyRegAlloc.compare("basic")) {
+    (new RABasic())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Loops, MBFI, spiller);
+  } else {
+
+  }
 }
 
 void PP2Dummy::coloringMIS(PP2::Graph &G, std::string ExportGraphFileName) {

@@ -1292,6 +1292,7 @@ void RegAllocFast::allocateBasicBlock(MachineBasicBlock &MBB) {
 }
 
 bool RegAllocFast::runOnMachineFunction(MachineFunction &MF) {
+  errs() << "[FAST REGISTER ALLOCATION]\n";
   LLVM_DEBUG(dbgs() << "********** FAST REGISTER ALLOCATION **********\n"
                     << "********** Function: " << MF.getName() << '\n');
   MRI = &MF.getRegInfo();

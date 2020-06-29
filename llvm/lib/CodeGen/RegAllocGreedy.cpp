@@ -2809,6 +2809,7 @@ void RAGreedy::reportNumberOfSplillsReloads(MachineLoop *L, unsigned &Reloads,
 }
 
 bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
+  errs() << "[GREEDY REGISTER ALLOCATION]\n";
   LLVM_DEBUG(dbgs() << "********** GREEDY REGISTER ALLOCATION **********\n"
                     << "********** Function: " << mf.getName() << '\n');
 
@@ -2869,6 +2870,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
 }
 
 bool RAGreedy::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, LiveIntervals &lis, LiveRegMatrix &matrix, SlotIndexes* indexes, MachineBlockFrequencyInfo* mbfi, MachineDominatorTree* domtree, MachineOptimizationRemarkEmitter* ore, MachineLoopInfo* loops, EdgeBundles* bundles, SpillPlacement* spillplacer, LiveDebugVariables* debugvars, AAResults* aa, Spiller* spiller) {
+  errs() << "[GREEDY REGISTER ALLOCATION]\n";
   LLVM_DEBUG(dbgs() << "********** GREEDY REGISTER ALLOCATION **********\n"
                     << "********** Function: " << mf.getName() << '\n');
 
