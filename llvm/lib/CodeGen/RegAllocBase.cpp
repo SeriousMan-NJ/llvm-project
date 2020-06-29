@@ -138,8 +138,10 @@ void RegAllocBase::allocatePhysRegs() {
       continue;
     }
 
-    if (AvailablePhysReg)
+    if (AvailablePhysReg) {
       Matrix->assign(*VirtReg, AvailablePhysReg);
+      errs() << printReg(VirtReg->reg, TRI) << " -> " << printReg(AvailablePhysReg, TRI) << "\n";
+    }
 
     for (unsigned Reg : SplitVRegs) {
       assert(LIS->hasInterval(Reg));

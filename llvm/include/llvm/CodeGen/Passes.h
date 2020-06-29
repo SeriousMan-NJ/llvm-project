@@ -176,6 +176,9 @@ namespace llvm {
   ///
   FunctionPass *createDefaultPBQPRegisterAllocator();
 
+  /// PP2 Dummy Pass
+  FunctionPass *createPP2DummyPass();
+
   /// PrologEpilogCodeInserter - This pass inserts prolog and epilog code,
   /// and eliminates abstract frame references.
   extern char &PrologEpilogCodeInserterID;
@@ -466,6 +469,7 @@ namespace llvm {
   /// Create IR Type Promotion pass. \see TypePromotion.cpp
   FunctionPass *createTypePromotionPass();
 
+  FunctionPass *createInterferenceGraphPass();
 } // End llvm namespace
 
 #endif

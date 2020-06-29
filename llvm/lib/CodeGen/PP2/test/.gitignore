@@ -1,0 +1,8 @@
+*.ll
+*.pp2graph
+*.s
+*.o
+*.clr
+*.pkl
+a.out
+

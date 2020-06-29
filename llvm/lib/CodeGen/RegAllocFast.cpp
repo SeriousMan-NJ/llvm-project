@@ -615,6 +615,7 @@ void RegAllocFast::assignVirtToPhysReg(LiveReg &LR, MCPhysReg PhysReg) {
   assert(LR.PhysReg == 0 && "Already assigned a physreg");
   assert(PhysReg != 0 && "Trying to assign no register");
   LR.PhysReg = PhysReg;
+  errs() << printReg(VirtReg, TRI) << " -> " << printReg(PhysReg, TRI) << "\n";
   setPhysRegState(PhysReg, VirtReg);
 }
 
