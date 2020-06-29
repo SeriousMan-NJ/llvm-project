@@ -8,7 +8,7 @@ do
     break
   fi
   echo "[COMPILE] $file"
-  clang -S -emit-llvm $file
+  clang -O3 -S -emit-llvm $file
 done
 
 
@@ -18,14 +18,14 @@ do
     break
   fi
   echo "[COMPILE] $file"
-  clang++ -S -emit-llvm $file
+  clang++ -O3 -S -emit-llvm $file
 done
 
 
 for file in *.ll
 do
 echo "[PROCESS] $file"
-  llc -regalloc pp2 -pp2-dummy-dump-graph -pp2-dummy-export-graph -pp2-skip $file &> /dev/null
+  llc -O3 -regalloc pp2 -pp2-dummy-dump-graph -pp2-dummy-export-graph -pp2-skip $file &> /dev/null
 done
 
 
@@ -45,5 +45,5 @@ cd $WORKING_DIR
 for file in *.ll
 do
 echo "[REGALLOC] $file"
-  llc -filetype=obj -regalloc pp2 -pp2-dummy-dump-graph -pp2-dummy-export-graph $file &> /dev/null
+  llc -O3 -filetype=obj -regalloc pp2 -pp2-dummy-dump-graph -pp2-dummy-export-graph $file &> /dev/null
 done

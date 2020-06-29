@@ -2,7 +2,7 @@
 *.pp2graph
 *.s
 *.o
-*.clr
 *.pkl
 a.out
-
+*.clr
+*\.clr\.[0-9]*

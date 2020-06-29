@@ -136,6 +136,13 @@ PP2DummyRegAlloc("pp2-regalloc",
                cl::init("greedy"), cl::NotHidden);
 #endif
 
+#ifndef NDEBUG
+static cl::opt<int>
+PP2DummyIndependentSetExtractionCount("pp2-isec",
+               cl::desc("Independent set extraction count"),
+               cl::init(1), cl::NotHidden);
+#endif
+
 namespace {
   class PP2Dummy : public MachineFunctionPass {
   public:
@@ -169,7 +176,7 @@ namespace {
                    Spiller &VRegSpiller);
 
     /// Coloring
-    void coloringMIS(PP2::Graph &G, std::string ExportGraphFileName);
+    void coloringMIS(PP2::Graph &G, std::string ExportGraphFileName, int isec);
     void coloring(PP2::Graph &G, std::string ExportGraphFileName);
 
     LiveIntervals* LIS;
@@ -281,7 +288,7 @@ void PP2::Graph::exportToNetworkx(raw_ostream &OS) const {
 
 void PP2Dummy::coloring(PP2::Graph &G, std::string ExportGraphFileName) {
   if (!PP2DummySkip) {
-    coloringMIS(G, ExportGraphFileName);
+    coloringMIS(G, ExportGraphFileName, PP2DummyIndependentSetExtractionCount);
   }
   if (!PP2DummyRegAlloc.compare("greedy")) {
     (new RAGreedy())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Indexes, MBFI, DomTree, ORE, Loops, Bundles, SpillPlacer, DebugVars, AA, spiller);
@@ -292,7 +299,7 @@ void PP2Dummy::coloring(PP2::Graph &G, std::string ExportGraphFileName) {
   }
 }
 
-void PP2Dummy::coloringMIS(PP2::Graph &G, std::string ExportGraphFileName) {
+void PP2Dummy::coloringMIS(PP2::Graph &G, std::string ExportGraphFileName, int isec) {
   const MachineRegisterInfo &MRI = G.MF.getRegInfo();
   const TargetRegisterInfo *TRI = MRI.getTargetRegisterInfo();
 
