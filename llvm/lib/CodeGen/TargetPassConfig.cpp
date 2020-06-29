@@ -1103,9 +1103,9 @@ bool TargetPassConfig::addRegAssignmentFast() {
 
 bool TargetPassConfig::addRegAssignmentOptimized() {
   // Add the selected register allocation pass.
-  // addPass(createRegAllocPass(true));
+  addPass(createRegAllocPass(true));
   // PP2 pass
-  addPass(createPP2DummyPass());
+  // addPass(createPP2DummyPass());
 
   // Allow targets to change the register assignments before rewriting.
   addPreRewrite();

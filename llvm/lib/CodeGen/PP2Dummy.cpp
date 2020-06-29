@@ -73,7 +73,10 @@
 #include <fstream>
 using namespace llvm;
 
-#define DEBUG_TYPE "pp2"
+#define DEBUG_TYPE "regalloc"
+
+static RegisterRegAlloc PP2RegAlloc("pp2", "PP2 register allocator",
+                                      createPP2DummyPass);
 
 namespace pp2 {
 // trim from start (in place)
@@ -97,36 +100,33 @@ inline void trim(std::string &s) {
 }
 }
 
-// static RegisterPP2 pp2DummyRegAlloc("test", "pp2 register allocator",
-//                                createPP2DummyPass);
-
-// #ifndef NDEBUG
+#ifndef NDEBUG
 static cl::opt<bool>
 PP2DummyDumpGraphs("pp2-dummy-dump-graph",
                cl::desc("Dump interference graph"),
                cl::init(false), cl::NotHidden);
-// #endif
+#endif
 
-// #ifndef NDEBUG
+#ifndef NDEBUG
 static cl::opt<bool>
 PP2DummyExportGraphs("pp2-dummy-export-graph",
                cl::desc("Export interference graph"),
                cl::init(false), cl::NotHidden);
-// #endif
+#endif
 
-// #ifndef NDEBUG
+#ifndef NDEBUG
 static cl::opt<bool>
 PP2DummyViewCFG("pp2-dummy-view-cfg",
                cl::desc("View CFG"),
                cl::init(false), cl::NotHidden);
-// #endif
+#endif
 
-// #ifndef NDEBUG
+#ifndef NDEBUG
 static cl::opt<bool>
 PP2DummySkip("pp2-skip",
                cl::desc("Skip MIS coloring"),
                cl::init(false), cl::NotHidden);
-// #endif
+#endif
 
 namespace {
   class PP2Dummy : public MachineFunctionPass {
@@ -210,7 +210,6 @@ void PP2Dummy::getAnalysisUsage(AnalysisUsage &AU) const {
 }
 
 char PP2Dummy::ID = 0;
-// static RegisterPass<PP2Dummy> X("pp2", "Interference Graph");
 
 FunctionPass *llvm::createPP2DummyPass() { return new PP2Dummy(); }
 
