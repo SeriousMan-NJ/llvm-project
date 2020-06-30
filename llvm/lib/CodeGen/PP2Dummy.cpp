@@ -303,34 +303,52 @@ void PP2Dummy::coloringMIS(PP2::Graph &G, std::string ExportGraphFileName, int i
   const MachineRegisterInfo &MRI = G.MF.getRegInfo();
   const TargetRegisterInfo *TRI = MRI.getTargetRegisterInfo();
 
-  std::ifstream mvc_graph_file(ExportGraphFileName);
-  assert (mvc_graph_file.is_open() && "MVC Graph file cannot be open!");
+  PP2::Graph::NodeVector g_nodes = G.Nodes;
+  PP2::Graph::NodeVector nodes = G.Nodes;
+  for (int i = 0; i < isec; i++) {
+    errs() << "iteration #" << i + 1 << "\n";
+    std::ifstream mvc_graph_file(ExportGraphFileName + "." + std::to_string(i));
+    assert (mvc_graph_file.is_open() && "MVC Graph file cannot be open!");
 
-  std::string vertices;
-  getline(mvc_graph_file, vertices);
-  mvc_graph_file.close();
+    std::string vertices;
+    getline(mvc_graph_file, vertices);
+    mvc_graph_file.close();
 
-  pp2::trim(vertices);
-  std::map<unsigned, bool> m;
-  std::stringstream ss(vertices);
-  unsigned idx;
-  while (ss >> idx) {
-    m[idx] = true;
-  }
+    pp2::trim(vertices);
+    std::stringstream ss(vertices);
+    unsigned idx;
 
-  for (auto const& N : G.Nodes) {
-    if (m.count(N.NId) == 0) {
-      AllocationOrder Order(N.VReg, *VRM, RegClassInfo, Matrix);
-      unsigned PhysReg = Order.next();
-      errs() << "[PP2] " << printReg(PhysReg, TRI) << " -> ";
+    std::map<unsigned, bool> mvc_nodes;
+    PP2::Graph::NodeVector next_nodes;
+    while (ss >> idx) {
+      mvc_nodes[idx] = true;
+      next_nodes.push_back(g_nodes[idx]);
+    }
 
-      if (Matrix->checkInterference(LIS->getInterval(N.VReg), PhysReg) == LiveRegMatrix::IK_Free) {
-        Matrix->assign(LIS->getInterval(N.VReg), PhysReg);
-        errs() << printReg(N.VReg, TRI) << "\n";
-      } else {
-        errs() << "Failed to allocate VReg: " << printReg(N.VReg, TRI) << "\n";
+    for (auto const& N : nodes) {
+      if (mvc_nodes.count(N.NId) == 0) {
+        AllocationOrder Order(N.VReg, *VRM, RegClassInfo, Matrix);
+
+        while (unsigned PhysReg = Order.next()) {
+          bool Interference = false;
+          // for (MCRegUnitIterator Units(PhysReg, TRI); Units.isValid(); ++Units) {
+            // if (LIS->getInterval(N.VReg).overlaps(LIS->getRegUnit(*Units))) {
+            //   Interference = true;
+            //   break;
+            // }
+          // }
+          // if (Interference)
+          //   continue;
+
+          if (Matrix->checkInterference(LIS->getInterval(N.VReg), PhysReg) == LiveRegMatrix::IK_Free) {
+            Matrix->assign(LIS->getInterval(N.VReg), PhysReg);
+            errs() << "[PP2] " << printReg(PhysReg, TRI) << "(" << PhysReg << ")" << " -> " << printReg(N.VReg, TRI) << "\n";
+            break;
+          }
+        }
       }
     }
+    nodes = next_nodes;
   }
   Matrix->invalidateVirtRegs();
 }
