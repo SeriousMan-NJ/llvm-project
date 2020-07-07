@@ -1,0 +1,15 @@
+#!/bin/bash
+for file in queens.ll misr.ll chomp.ll
+do
+  echo "[REGALLOC] $file"
+  for i in {0..8}
+  do
+    printf "ISEC #$i: "
+    llc -O3 -filetype=obj -regalloc pp2 -pp2-dummy-dump-graph -pp2-dummy-export-graph -pp2-isec $i $file &> /dev/null
+    filename="$(echo -e "$file" | sed -e 's/\.ll$//')"
+    clang "$filename.o" -o "$filename"
+    echo "Benchmarking..."
+    perf stat -B -e cache-references,cache-misses,cycles,instructions,branches,faults,migrations -r 100 ./$filename > "$filename.bench.r.$i"
+    rm $filename
+  done
+done

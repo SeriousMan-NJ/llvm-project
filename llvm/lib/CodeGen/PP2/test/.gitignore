@@ -6,3 +6,4 @@
 a.out
 *.clr
 *\.clr\.[0-9]*
+stats.json

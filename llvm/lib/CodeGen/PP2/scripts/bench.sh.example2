@@ -1,0 +1,14 @@
+#!/bin/bash
+for i in {0..8}
+do
+  for file in *.ll
+  do
+    echo "[REGALLOC] $file"
+    llc -O3 -filetype=obj -regalloc pp2 -pp2-dummy-dump-graph -pp2-dummy-export-graph -pp2-isec $i $file &> /dev/null
+  done
+  printf "ISEC #$i: "
+  clang -lm args.o newbh.o util.o walksub.o -o bh
+  echo "Benchmarking..."
+  perf stat -B -e cache-references,cache-misses,cycles,instructions,branches,faults,migrations -r 100 ./bh 40000 30 > "bh.bench.$i"
+  rm bh
+done

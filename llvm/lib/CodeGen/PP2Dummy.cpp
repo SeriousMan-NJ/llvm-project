@@ -72,6 +72,7 @@
 #include <utility>
 #include <vector>
 #include <fstream>
+#include <unordered_map>
 using namespace llvm;
 
 #define DEBUG_TYPE "regalloc"
@@ -257,6 +258,9 @@ void PP2Dummy::initializeGraph(PP2::Graph &G, VirtRegMap &VRM,
 
   for (auto VReg1 : VRegsToAlloc) {
     for (auto VReg2 : VRegsToAlloc) {
+      // TODO: register aliasing
+      // TODO: find free phy reg? (r8 ~ r15)
+      // argument passing not spilling?
       if (VReg1 != VReg2 && LIS->getInterval(VReg1).overlaps(LIS->getInterval(VReg2))) {
         G.addEdgeForVReg(VReg1, VReg2);
       }
@@ -330,7 +334,7 @@ void PP2Dummy::coloringMIS(PP2::Graph &G, std::string ExportGraphFileName, int i
         AllocationOrder Order(N.VReg, *VRM, RegClassInfo, Matrix);
 
         while (unsigned PhysReg = Order.next()) {
-          bool Interference = false;
+          // bool Interference = false;
           // for (MCRegUnitIterator Units(PhysReg, TRI); Units.isValid(); ++Units) {
             // if (LIS->getInterval(N.VReg).overlaps(LIS->getRegUnit(*Units))) {
             //   Interference = true;
@@ -340,9 +344,16 @@ void PP2Dummy::coloringMIS(PP2::Graph &G, std::string ExportGraphFileName, int i
           // if (Interference)
           //   continue;
 
-          if (Matrix->checkInterference(LIS->getInterval(N.VReg), PhysReg) == LiveRegMatrix::IK_Free) {
+          LiveRegMatrix::InterferenceKind IK = Matrix->checkInterference(LIS->getInterval(N.VReg), PhysReg);
+          if (IK == LiveRegMatrix::IK_Free) {
             Matrix->assign(LIS->getInterval(N.VReg), PhysReg);
             errs() << "[PP2] " << printReg(PhysReg, TRI) << "(" << PhysReg << ")" << " -> " << printReg(N.VReg, TRI) << "\n";
+            break;
+          } else if (IK == LiveRegMatrix::IK_RegMask) {
+            errs() << "[PP2] IK_RegMask: " << printReg(PhysReg, TRI) << "(" << PhysReg << ")" << " -/> " << printReg(N.VReg, TRI) << "\n";
+            break;
+          } else if (IK == LiveRegMatrix::IK_RegUnit) {
+            errs() << "[PP2] IK_RegUnit: " << printReg(PhysReg, TRI) << "(" << PhysReg << ")" << " -/> " << printReg(N.VReg, TRI) << "\n";
             break;
           }
         }
@@ -387,7 +398,7 @@ bool PP2Dummy::runOnMachineFunction(MachineFunction &MF) {
 #ifndef NDEBUG
   const Function &F = MF.getFunction();
   std::string FullyQualifiedName =
-    F.getParent()->getModuleIdentifier() + "." + F.getName().str();
+    F.getParent()->getModuleIdentifier() + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
 #endif
 
   if (!VRegsToAlloc.empty()) {

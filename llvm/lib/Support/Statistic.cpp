@@ -47,6 +47,10 @@ static cl::opt<bool> StatsAsJSON("stats-json",
                                  cl::desc("Display statistics as json data"),
                                  cl::Hidden);
 
+static cl::opt<bool> StatsAsJSONFile("stats-json-file",
+                                 cl::desc("Generate statistics file as json data"),
+                                 cl::Hidden);
+
 static bool Enabled;
 static bool PrintOnExit;
 
@@ -233,6 +237,10 @@ void llvm::PrintStatistics() {
 
   // Get the stream to write to.
   std::unique_ptr<raw_ostream> OutStream = CreateInfoOutputFile();
+  std::error_code EC;
+  raw_fd_ostream OutFileStream("stats.json", EC, sys::fs::OF_Text);
+  if (StatsAsJSONFile)
+    PrintStatisticsJSON(OutFileStream);
   if (StatsAsJSON)
     PrintStatisticsJSON(*OutStream);
   else
