@@ -57,6 +57,7 @@
 #include "llvm/CodeGen/RegisterClassInfo.h"
 #include "RegAllocGreedy.h"
 #include "RegAllocBasic.h"
+#include "RegAllocPBQP.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -302,8 +303,10 @@ void PP2Dummy::coloring(PP2::Graph &G, std::string ExportGraphFileName) {
     (new RAGreedy())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Indexes, MBFI, DomTree, ORE, Loops, Bundles, SpillPlacer, DebugVars, AA, spiller);
   } else if (!PP2DummyRegAlloc.compare("basic")) {
     (new RABasic())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Loops, MBFI, spiller);
+  } else if (!PP2DummyRegAlloc.compare("pbqp")) {
+    (new RegAllocPBQP())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Loops, MBFI, spiller, VRegsToAlloc, EmptyIntervalVRegs);
   } else {
-
+    assert(false);
   }
 }
 
@@ -352,6 +355,7 @@ void PP2Dummy::coloringMIS(PP2::Graph &G, std::string ExportGraphFileName, int i
           if (IK == LiveRegMatrix::IK_Free) {
             Matrix->assign(LIS->getInterval(N.VReg), PhysReg);
             errs() << "[PP2] " << printReg(PhysReg, TRI) << "(" << PhysReg << ")" << " -> " << printReg(N.VReg, TRI) << "\n";
+            VRegsToAlloc.erase(N.VReg);
             break;
           } else if (IK == LiveRegMatrix::IK_RegMask) {
             errs() << "[PP2] IK_RegMask: " << printReg(PhysReg, TRI) << "(" << PhysReg << ")" << " -/> " << printReg(N.VReg, TRI) << "\n";
