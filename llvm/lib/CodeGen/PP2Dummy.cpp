@@ -244,7 +244,11 @@ void PP2Dummy::findVRegIntervalsToAlloc(const MachineFunction &MF,
 
 void PP2Dummy::initializeGraph(PP2::Graph &G, VirtRegMap &VRM,
                                         Spiller &VRegSpiller) {
-  for (auto VReg : VRegsToAlloc) {
+  std::vector<unsigned> Worklist(VRegsToAlloc.begin(), VRegsToAlloc.end());
+
+  while (!Worklist.empty()) {
+    unsigned VReg = Worklist.back();
+    Worklist.pop_back();
     // Move empty intervals to the EmptyIntervalVReg set.
     if (LIS->getInterval(VReg).empty()) {
       EmptyIntervalVRegs.insert(VReg);
