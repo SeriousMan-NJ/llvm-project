@@ -341,16 +341,6 @@ void PP2Dummy::coloringMIS(PP2::Graph &G, std::string ExportGraphFileName, int i
         AllocationOrder Order(N.VReg, *VRM, RegClassInfo, Matrix);
 
         while (unsigned PhysReg = Order.next()) {
-          // bool Interference = false;
-          // for (MCRegUnitIterator Units(PhysReg, TRI); Units.isValid(); ++Units) {
-            // if (LIS->getInterval(N.VReg).overlaps(LIS->getRegUnit(*Units))) {
-            //   Interference = true;
-            //   break;
-            // }
-          // }
-          // if (Interference)
-          //   continue;
-
           LiveRegMatrix::InterferenceKind IK = Matrix->checkInterference(LIS->getInterval(N.VReg), PhysReg);
           if (IK == LiveRegMatrix::IK_Free) {
             Matrix->assign(LIS->getInterval(N.VReg), PhysReg);
