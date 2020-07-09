@@ -108,6 +108,7 @@ private:
   char *customPassID;
 
   RegSet VRegsToAlloc, EmptyIntervalVRegs, VRegsAllocated;
+  LiveRegMatrix *Matrix = nullptr;
 
   /// Inst which is a def of an original reg and whose defs are already all
   /// dead after remat is saved in DeadRemats. The deletion of such inst is

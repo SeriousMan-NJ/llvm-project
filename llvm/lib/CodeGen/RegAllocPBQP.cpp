@@ -44,6 +44,7 @@
 #include "llvm/CodeGen/CalcSpillWeights.h"
 #include "llvm/CodeGen/LiveInterval.h"
 #include "llvm/CodeGen/LiveIntervals.h"
+#include "llvm/CodeGen/LiveRegMatrix.h"
 #include "llvm/CodeGen/LiveRangeEdit.h"
 #include "llvm/CodeGen/LiveStacks.h"
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
@@ -555,6 +556,16 @@ void RegAllocPBQP::initializeGraph(PBQPRAGraph &G, VirtRegMap &VRM,
       if (Interference)
         continue;
 
+      // 이전에 MIS를 통해 색칠된 virtual register가 있으므로, virtual register와의 interference도 확인해야 한다.
+      if (Matrix != nullptr) { // pp2 pass
+        LiveRegMatrix::InterferenceKind IK = Matrix->checkInterference(LIS.getInterval(VReg), PReg);
+        if (IK == LiveRegMatrix::IK_VirtReg) {
+          errs() << "[PP2] Virtual register interference: " << printReg(VReg, &TRI) << " -> " << printReg(PReg, &TRI) << "\n";
+          continue;
+        }
+        assert(IK == LiveRegMatrix::IK_Free && "Unknown interference!");
+      }
+
       // preg is usable for this virtual register.
       VRegAllowed.push_back(PReg);
     }
@@ -798,6 +809,7 @@ bool RegAllocPBQP::runOnMachineFunction(MachineFunction &MF) {
   postOptimization(*VRegSpiller, LIS);
   VRegsToAlloc.clear();
   EmptyIntervalVRegs.clear();
+  VRegsAllocated.clear();
 
   LLVM_DEBUG(dbgs() << "Post alloc VirtRegMap:\n" << VRM << "\n");
 
@@ -811,6 +823,8 @@ bool RegAllocPBQP::runOnMachineFunctionCustom(MachineFunction &MF, VirtRegMap &v
   MachineBlockFrequencyInfo &MBFI = *mbfi;
 
   VirtRegMap &VRM = vrm;
+
+  Matrix = &matrix;
 
   calculateSpillWeightsAndHints(LIS, MF, &VRM, *loops,
                                 MBFI, normalizePBQPSpillWeight);
