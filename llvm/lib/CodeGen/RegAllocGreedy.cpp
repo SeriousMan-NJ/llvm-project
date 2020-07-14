@@ -85,6 +85,7 @@ using namespace llvm;
 STATISTIC(NumGlobalSplits, "Number of split global live ranges");
 STATISTIC(NumLocalSplits,  "Number of split local live ranges");
 STATISTIC(NumEvicted,      "Number of interferences evicted");
+STATISTIC(NumSplittedOrEvictedVRegsAllocatedByPP2, "Number of splitted or evicted virtual registers allocated by PP2");
 
 static cl::opt<SplitEditor::ComplementSpillMode> SplitSpillMode(
     "split-spill-mode", cl::Hidden,
@@ -681,6 +682,10 @@ void RAGreedy::evictInterference(LiveInterval &VirtReg, unsigned PhysReg,
             VirtReg.isSpillable() < Intf->isSpillable()) &&
            "Cannot decrease cascade number, illegal eviction");
     ExtraRegInfo[Intf->reg].Cascade = Cascade;
+    if (VRegsAllocated.count(VirtReg.reg) > 0) {
+      VRegsAllocated.erase(VirtReg.reg);
+      ++NumSplittedOrEvictedVRegsAllocatedByPP2;
+    }
     ++NumEvicted;
     NewVRegs.push_back(Intf->reg);
   }
@@ -1364,6 +1369,10 @@ void RAGreedy::splitAroundRegion(LiveRangeEdit &LREdit,
     }
   }
 
+  if (VRegsAllocated.count(Reg) > 0) {
+    VRegsAllocated.erase(Reg);
+    ++NumSplittedOrEvictedVRegsAllocatedByPP2;
+  }
   ++NumGlobalSplits;
 
   SmallVector<unsigned, 8> IntvMap;
@@ -2041,6 +2050,10 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
         LLVM_DEBUG(dbgs() << printReg(LREdit.get(i)));
       }
     LLVM_DEBUG(dbgs() << '\n');
+  }
+  if (VRegsAllocated.count(VirtReg.reg) > 0) {
+    VRegsAllocated.erase(VirtReg.reg);
+    ++NumSplittedOrEvictedVRegsAllocatedByPP2;
   }
   ++NumLocalSplits;
 
@@ -2874,7 +2887,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   return true;
 }
 
-bool RAGreedy::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, LiveIntervals &lis, LiveRegMatrix &matrix, SlotIndexes* indexes, MachineBlockFrequencyInfo* mbfi, MachineDominatorTree* domtree, MachineOptimizationRemarkEmitter* ore, MachineLoopInfo* loops, EdgeBundles* bundles, SpillPlacement* spillplacer, LiveDebugVariables* debugvars, AAResults* aa, Spiller* spiller) {
+bool RAGreedy::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, LiveIntervals &lis, LiveRegMatrix &matrix, SlotIndexes* indexes, MachineBlockFrequencyInfo* mbfi, MachineDominatorTree* domtree, MachineOptimizationRemarkEmitter* ore, MachineLoopInfo* loops, EdgeBundles* bundles, SpillPlacement* spillplacer, LiveDebugVariables* debugvars, AAResults* aa, Spiller* spiller, RegSet vRegsAllocated) {
   if (ViewCFG)
     mf.viewCFG();
 
@@ -2912,6 +2925,7 @@ bool RAGreedy::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, 
   SpillPlacer = spillplacer;
   DebugVars = debugvars;
   AA = aa;
+  VRegsAllocated = vRegsAllocated;
 
   initializeCSRCost();
 
@@ -2938,6 +2952,8 @@ bool RAGreedy::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, 
 
   if (ViewCFG)
     mf.viewCFG();
+
+  VRegsAllocated.clear();
 
   return true;
 }

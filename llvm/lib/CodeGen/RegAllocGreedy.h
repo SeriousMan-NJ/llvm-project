@@ -66,6 +66,7 @@
 #include <queue>
 #include <tuple>
 #include <utility>
+#include <set>
 
 using namespace llvm;
 
@@ -76,6 +77,7 @@ class RAGreedy : public MachineFunctionPass,
   using PQueue = std::priority_queue<std::pair<unsigned, unsigned>>;
   using SmallLISet = SmallPtrSet<LiveInterval *, 4>;
   using SmallVirtRegSet = SmallSet<unsigned, 16>;
+  using RegSet = std::set<unsigned>;
 
   // context
   MachineFunction *MF;
@@ -333,6 +335,8 @@ class RAGreedy : public MachineFunctionPass,
   /// Set of broken hints that may be reconciled later because of eviction.
   SmallSetVector<LiveInterval *, 8> SetOfBrokenHints;
 
+  RegSet VRegsAllocated;
+
 public:
   RAGreedy();
 
@@ -350,7 +354,7 @@ public:
 
   /// Perform register allocation.
   bool runOnMachineFunction(MachineFunction &mf) override;
-  bool runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, LiveIntervals &lis, LiveRegMatrix &matrix, SlotIndexes* indexes, MachineBlockFrequencyInfo* mbfi, MachineDominatorTree* domtree, MachineOptimizationRemarkEmitter* ore, MachineLoopInfo* loops, EdgeBundles* bundles, SpillPlacement* spillplacer, LiveDebugVariables* debugvars, AAResults* aa, Spiller* spiller);
+  bool runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, LiveIntervals &lis, LiveRegMatrix &matrix, SlotIndexes* indexes, MachineBlockFrequencyInfo* mbfi, MachineDominatorTree* domtree, MachineOptimizationRemarkEmitter* ore, MachineLoopInfo* loops, EdgeBundles* bundles, SpillPlacement* spillplacer, LiveDebugVariables* debugvars, AAResults* aa, Spiller* spiller, RegSet vRegsAllocated);
 
   MachineFunctionProperties getRequiredProperties() const override {
     return MachineFunctionProperties().set(

@@ -78,6 +78,9 @@ using namespace llvm;
 
 #define DEBUG_TYPE "regalloc"
 
+STATISTIC(NumMISNodes, "Number of MIS nodes");
+STATISTIC(NumSkippedNodes, "Number of skipped MIS nodes");
+
 static RegisterRegAlloc PP2RegAlloc("pp2", "PP2 register allocator",
                                       createPP2DummyPass);
 
@@ -163,7 +166,7 @@ namespace {
   private:
     using RegSet = std::set<unsigned>;
 
-    RegSet VRegsToAlloc, EmptyIntervalVRegs;
+    RegSet VRegsToAlloc, EmptyIntervalVRegs, VRegsAllocated;
     SmallPtrSet<MachineInstr *, 32> DeadRemats;
 
     /// Finds the initial set of vreg intervals to allocate.
@@ -300,8 +303,9 @@ void PP2Dummy::coloring(PP2::Graph &G, std::string ExportGraphFileName) {
     coloringMIS(G, ExportGraphFileName, PP2DummyIndependentSetExtractionCount);
   }
   if (!PP2DummyRegAlloc.compare("greedy")) {
-    (new RAGreedy())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Indexes, MBFI, DomTree, ORE, Loops, Bundles, SpillPlacer, DebugVars, AA, spiller);
+    (new RAGreedy())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Indexes, MBFI, DomTree, ORE, Loops, Bundles, SpillPlacer, DebugVars, AA, spiller, VRegsAllocated);
   } else if (!PP2DummyRegAlloc.compare("basic")) {
+    // TODO: VRegsAllocated
     (new RABasic())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Loops, MBFI, spiller);
   } else if (!PP2DummyRegAlloc.compare("pbqp")) {
     (new RegAllocPBQP())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Loops, MBFI, spiller, VRegsToAlloc, EmptyIntervalVRegs);
@@ -346,12 +350,16 @@ void PP2Dummy::coloringMIS(PP2::Graph &G, std::string ExportGraphFileName, int i
             Matrix->assign(LIS->getInterval(N.VReg), PhysReg);
             errs() << "[PP2] " << printReg(PhysReg, TRI) << "(" << PhysReg << ")" << " -> " << printReg(N.VReg, TRI) << "\n";
             VRegsToAlloc.erase(N.VReg);
+            VRegsAllocated.insert(N.VReg);
+            ++NumMISNodes;
             break;
           } else if (IK == LiveRegMatrix::IK_RegMask) {
             errs() << "[PP2] IK_RegMask: " << printReg(PhysReg, TRI) << "(" << PhysReg << ")" << " -/> " << printReg(N.VReg, TRI) << "\n";
+            ++NumSkippedNodes;
             break;
           } else if (IK == LiveRegMatrix::IK_RegUnit) {
             errs() << "[PP2] IK_RegUnit: " << printReg(PhysReg, TRI) << "(" << PhysReg << ")" << " -/> " << printReg(N.VReg, TRI) << "\n";
+            ++NumSkippedNodes;
             break;
           }
         }
@@ -427,6 +435,7 @@ bool PP2Dummy::runOnMachineFunction(MachineFunction &MF) {
 
   VRegsToAlloc.clear();
   EmptyIntervalVRegs.clear();
+  VRegsAllocated.clear();
 
   errs() << "[PP2] Dummy end!\n";
 
