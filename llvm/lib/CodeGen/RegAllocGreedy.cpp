@@ -2287,7 +2287,9 @@ unsigned RAGreedy::tryLastChanceRecoloring(LiveInterval &VirtReg,
     // recoloring has the right information about the interferes and
     // available colors.
     Matrix->assign(VirtReg, PhysReg);
-    errs() << printReg(VirtReg.reg, TRI) << " -> " << printReg(PhysReg, TRI) << "\n";
+    // if (PRegToVRegs != nullptr)
+    //   (*PRegToVRegs)[PhysReg].insert(VirtReg.reg);
+    // errs() << printReg(VirtReg.reg, TRI) << " -> " << printReg(PhysReg, TRI) << "\n";
 
     // Save the current recoloring state.
     // If we cannot recolor all the interferences, we will have to start again
@@ -2331,7 +2333,9 @@ unsigned RAGreedy::tryLastChanceRecoloring(LiveInterval &VirtReg,
         Matrix->unassign(**It);
       unsigned ItPhysReg = VirtRegToPhysReg[ItVirtReg];
       Matrix->assign(**It, ItPhysReg);
-      errs() << printReg((*It)->reg, TRI) << " -> " <<  printReg(ItPhysReg, TRI) << "\n";
+      // if (PRegToVRegs != nullptr)
+      //   (*PRegToVRegs)[ItPhysReg].insert((*It)->reg);
+      // errs() << printReg((*It)->reg, TRI) << " -> " <<  printReg(ItPhysReg, TRI) << "\n";
     }
   }
 
@@ -2373,8 +2377,10 @@ bool RAGreedy::tryRecoloringCandidates(PQueue &RecoloringQueue,
                       << " succeeded with: " << printReg(PhysReg, TRI) << '\n');
 
     Matrix->assign(*LI, PhysReg);
-    errs() << printReg(LI->reg) << " -> " << printReg(PhysReg, TRI) << "\n";
-    FixedRegisters.insert(LI->reg);
+    // if (PRegToVRegs != nullptr)
+    //   (*PRegToVRegs)[PhysReg].insert(LI->reg);
+    // errs() << printReg(LI->reg) << " -> " << printReg(PhysReg, TRI) << "\n";
+    // FixedRegisters.insert(LI->reg);
   }
   return true;
 }
@@ -2586,7 +2592,9 @@ void RAGreedy::tryHintRecoloring(LiveInterval &VirtReg) {
       // Recolor the live-range.
       Matrix->unassign(LI);
       Matrix->assign(LI, PhysReg);
-      errs() << printReg(LI.reg) << " -> " << printReg(PhysReg, TRI) << "\n";
+      // if (PRegToVRegs != nullptr)
+      //   (*PRegToVRegs)[PhysReg].insert(LI.reg);
+      // errs() << printReg(LI.reg) << " -> " << printReg(PhysReg, TRI) << "\n";
     }
     // Push all copy-related live-ranges to keep reconciling the broken
     // hints.
@@ -2887,7 +2895,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   return true;
 }
 
-bool RAGreedy::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, LiveIntervals &lis, LiveRegMatrix &matrix, SlotIndexes* indexes, MachineBlockFrequencyInfo* mbfi, MachineDominatorTree* domtree, MachineOptimizationRemarkEmitter* ore, MachineLoopInfo* loops, EdgeBundles* bundles, SpillPlacement* spillplacer, LiveDebugVariables* debugvars, AAResults* aa, Spiller* spiller, RegSet vRegsAllocated) {
+bool RAGreedy::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, LiveIntervals &lis, LiveRegMatrix &matrix, SlotIndexes* indexes, MachineBlockFrequencyInfo* mbfi, MachineDominatorTree* domtree, MachineOptimizationRemarkEmitter* ore, MachineLoopInfo* loops, EdgeBundles* bundles, SpillPlacement* spillplacer, LiveDebugVariables* debugvars, AAResults* aa, Spiller* spiller, RegSet vRegsAllocated, RegMap *pRegToVRegs) {
   if (ViewCFG)
     mf.viewCFG();
 
@@ -2926,6 +2934,7 @@ bool RAGreedy::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, 
   DebugVars = debugvars;
   AA = aa;
   VRegsAllocated = vRegsAllocated;
+  PRegToVRegs = pRegToVRegs;
 
   initializeCSRCost();
 
@@ -2954,6 +2963,7 @@ bool RAGreedy::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, 
     mf.viewCFG();
 
   VRegsAllocated.clear();
+  PRegToVRegs = nullptr;
 
   return true;
 }

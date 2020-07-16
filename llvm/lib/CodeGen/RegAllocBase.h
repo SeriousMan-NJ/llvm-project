@@ -38,6 +38,8 @@
 
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/CodeGen/RegisterClassInfo.h"
+#include <map>
+#include <set>
 
 namespace llvm {
 
@@ -61,12 +63,16 @@ class RegAllocBase {
   virtual void anchor();
 
 protected:
+  using RegSet = std::set<unsigned>;
+  using RegMap = std::map<unsigned, RegSet>;
+
   const TargetRegisterInfo *TRI = nullptr;
   MachineRegisterInfo *MRI = nullptr;
   VirtRegMap *VRM = nullptr;
   LiveIntervals *LIS = nullptr;
   LiveRegMatrix *Matrix = nullptr;
   RegisterClassInfo RegClassInfo;
+  RegMap *PRegToVRegs = nullptr;
 
   /// Inst which is a def of an original reg and whose defs are already all
   /// dead after remat is saved in DeadRemats. The deletion of such inst is

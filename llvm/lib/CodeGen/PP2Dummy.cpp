@@ -148,6 +148,13 @@ PP2DummyIndependentSetExtractionCount("pp2-isec",
                cl::init(1), cl::NotHidden);
 #endif
 
+#ifndef NDEBUG
+static cl::opt<bool>
+PP2DummyPrintPRegToVRegs("pp2-print-preg2vregs",
+               cl::desc("Print physical register to virtual registers mapping as JSON"),
+               cl::init(false), cl::NotHidden);
+#endif
+
 namespace {
   class PP2Dummy : public MachineFunctionPass {
   public:
@@ -165,8 +172,10 @@ namespace {
 
   private:
     using RegSet = std::set<unsigned>;
+    using RegMap = std::map<unsigned, RegSet>;
 
     RegSet VRegsToAlloc, EmptyIntervalVRegs, VRegsAllocated;
+    RegMap PRegToVRegs;
     SmallPtrSet<MachineInstr *, 32> DeadRemats;
 
     /// Finds the initial set of vreg intervals to allocate.
@@ -183,6 +192,9 @@ namespace {
     /// Coloring
     void coloringMIS(PP2::Graph &G, std::string ExportGraphFileName, int isec);
     void coloring(PP2::Graph &G, std::string ExportGraphFileName);
+
+    /// Statistics
+    void printPRegToVRegs(const MachineFunction &MF);
 
     LiveIntervals* LIS;
     VirtRegMap* VRM;
@@ -303,11 +315,13 @@ void PP2Dummy::coloring(PP2::Graph &G, std::string ExportGraphFileName) {
     coloringMIS(G, ExportGraphFileName, PP2DummyIndependentSetExtractionCount);
   }
   if (!PP2DummyRegAlloc.compare("greedy")) {
-    (new RAGreedy())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Indexes, MBFI, DomTree, ORE, Loops, Bundles, SpillPlacer, DebugVars, AA, spiller, VRegsAllocated);
+    (new RAGreedy())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Indexes, MBFI, DomTree, ORE, Loops, Bundles, SpillPlacer, DebugVars, AA, spiller, VRegsAllocated, &PRegToVRegs);
   } else if (!PP2DummyRegAlloc.compare("basic")) {
     // TODO: VRegsAllocated
+    // TODO: PRegToVRegs
     (new RABasic())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Loops, MBFI, spiller);
   } else if (!PP2DummyRegAlloc.compare("pbqp")) {
+    // TODO: PRegToVRegs
     (new RegAllocPBQP())->runOnMachineFunctionCustom(G.MF, *VRM, *LIS, *Matrix, Loops, MBFI, spiller, VRegsToAlloc, EmptyIntervalVRegs);
   } else {
     assert(false);
@@ -351,6 +365,7 @@ void PP2Dummy::coloringMIS(PP2::Graph &G, std::string ExportGraphFileName, int i
             errs() << "[PP2] " << printReg(PhysReg, TRI) << "(" << PhysReg << ")" << " -> " << printReg(N.VReg, TRI) << "\n";
             VRegsToAlloc.erase(N.VReg);
             VRegsAllocated.insert(N.VReg);
+            PRegToVRegs[PhysReg].insert(N.VReg);
             ++NumMISNodes;
             break;
           } else if (IK == LiveRegMatrix::IK_RegMask) {
@@ -368,6 +383,31 @@ void PP2Dummy::coloringMIS(PP2::Graph &G, std::string ExportGraphFileName, int i
     nodes = next_nodes;
   }
   Matrix->invalidateVirtRegs();
+}
+
+void PP2Dummy::printPRegToVRegs(const MachineFunction &MF) {
+  const MachineRegisterInfo &MRI = MF.getRegInfo();
+  const TargetRegisterInfo *TRI = MRI.getTargetRegisterInfo();
+  std::error_code EC;
+  raw_fd_ostream OS("preg2vregs.json", EC, sys::fs::OF_Text);
+
+  OS << "{\n";
+  const char *delim = "";
+  const char *delim2 = "";
+  for (auto const& m : PRegToVRegs) {
+    OS << delim;
+    OS << "\t\"" << printReg(m.first, TRI) << "\": [";
+    delim2 = "";
+    for (unsigned VReg : m.second) {
+      OS << delim2;
+      OS << "\"" << printReg(VReg, TRI) << "\"";
+      delim2 = ",";
+    }
+    OS << "]";
+    delim = ",\n";
+  }
+  OS << "\n}\n";
+  OS.flush();
 }
 
 bool PP2Dummy::runOnMachineFunction(MachineFunction &MF) {
@@ -433,9 +473,14 @@ bool PP2Dummy::runOnMachineFunction(MachineFunction &MF) {
   coloring(G, ExportGraphFileName);
   }
 
+  if (PP2DummyPrintPRegToVRegs) {
+    printPRegToVRegs(MF);
+  }
+
   VRegsToAlloc.clear();
   EmptyIntervalVRegs.clear();
   VRegsAllocated.clear();
+  PRegToVRegs.clear();
 
   errs() << "[PP2] Dummy end!\n";
 

@@ -140,6 +140,8 @@ void RegAllocBase::allocatePhysRegs() {
 
     if (AvailablePhysReg) {
       Matrix->assign(*VirtReg, AvailablePhysReg);
+      if (PRegToVRegs != nullptr)
+        (*PRegToVRegs)[AvailablePhysReg].insert(VirtReg->reg);
       errs() << printReg(VirtReg->reg, TRI) << " -> " << printReg(AvailablePhysReg, TRI) << "\n";
     }
 
