@@ -6,6 +6,7 @@ import shutil
 import click
 import csv
 import json
+import time
 
 class BenchmarkBase():
     def __init__(self, path):
@@ -18,11 +19,16 @@ class BenchmarkBase():
         self.CC = 'clang'
         self.CXX = 'clang++'
         self.LINKER = 'clang++'
+        self.linking_files = ''
 
         self.COMMON_FLAGS = '-O3 -S -emit-llvm -fno-vectorize -fno-slp-vectorize'
 
         self.CC_FLAGS = ''
         self.CXX_FLAGS = ''
+        self.LINKER_FLAGS = ''
+
+        self.BINARY = 'a.out'
+        self.BINARY_OPTION = ''
 
         self.BACKEND_REGALLOC = 'greedy'
 
@@ -36,7 +42,33 @@ class BenchmarkBase():
         os.system(f'rm -rf {self.WORKING_DIR}/tmp')
 
     def compile(self):
-        raise Exception("Not implemented")
+        with open(f'{self.WORKING_DIR}/log.txt', 'w') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'w') as log_err:
+            for filename in os.listdir(self.WORKING_DIR):
+                filename = os.path.join(self.WORKING_DIR, filename)
+                if filename.endswith(".c"):
+                    print(f"[COMPILE] {filename}")
+                    process = sp.Popen(f'cd {self.WORKING_DIR} && {self.CC} {self.CC_FLAGS} {filename}',
+                        shell=True,
+                        executable='/bin/bash',
+                        stdout=sp.PIPE,
+                        stderr=sp.PIPE)
+                    stdout, stderr = process.communicate()
+                    if process.returncode != 0:
+                        log_err.write(stderr.decode('utf-8'))
+                        log_err.write(f"Failed to compile: {filename}")
+                        exit(201)
+                if filename.endswith(".cpp"):
+                    print(f"[COMPILE] {filename}")
+                    process = sp.Popen(f'cd {self.WORKING_DIR} && {self.CXX} {self.CXX_FLAGS} {filename}',
+                        shell=True,
+                        executable='/bin/bash',
+                        stdout=sp.PIPE,
+                        stderr=sp.PIPE)
+                    stdout, stderr = process.communicate()
+                    if process.returncode != 0:
+                        log_err.write(stderr.decode('utf-8'))
+                        log_err.write(f"Failed to compile: {filename}")
+                        exit(202)
 
     def gen_if_graph(self):
         with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
@@ -46,6 +78,7 @@ class BenchmarkBase():
                     print(f"[PROCESS] {filename}")
                     process = sp.Popen(f'cd {self.WORKING_DIR} && {self.LLC} {self.LLC_PROCESS_FLAGS} {filename}',
                         shell=True,
+                        executable='/bin/bash',
                         stdout=sp.PIPE,
                         stderr=sp.PIPE)
                     stdout, stderr = process.communicate()
@@ -58,6 +91,7 @@ class BenchmarkBase():
         with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
             process = sp.Popen(f'source ~/anaconda3/etc/profile.d/conda.sh && conda activate {self.CONDA_S2V_DQN_ENV} && python {self.CURRENT_DIR}/graph_to_pickle.py --path {self.WORKING_DIR}',
                 shell=True,
+                executable='/bin/bash',
                 stdout=sp.PIPE,
                 stderr=sp.PIPE)
             stdout, stderr = process.communicate()
@@ -68,7 +102,8 @@ class BenchmarkBase():
 
     def gen_coloring(self):
         print("[COLORING] start coloring")
-        g_type='barabasi_albert'
+        g_type='erdos_renyi'
+        # g_type='barabasi_albert'
         data_test='dummy'
         data_dir=self.WORKING_DIR
         output_dir=self.WORKING_DIR
@@ -77,7 +112,7 @@ class BenchmarkBase():
         max_bp_iter=5
         embed_dim=64
         dev_id=3
-        batch_size=64
+        batch_size=128
         net_type='QNet'
         reg_hidden=64
         learning_rate=0.0001
@@ -116,22 +151,114 @@ class BenchmarkBase():
         with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
             env = os.environ.copy()
             env['WORKING_DIR'] = self.WORKING_DIR
-            process = sp.Popen(f'source ~/anaconda3/etc/profile.d/conda.sh && conda activate {self.CONDA_S2V_DQN_ENV} && cd {self.HOME}/graph_comb_opt/code/s2v_mvc && {evaluate}',
+            process = sp.Popen(f'source {self.HOME}/.bash_profile && source {self.HOME}/anaconda3/etc/profile.d/conda.sh && conda activate {self.CONDA_S2V_DQN_ENV} && cd {self.HOME}/graph_comb_opt/code/s2v_mvc && {evaluate}',
                 shell=True,
+                executable='/bin/bash',
                 stdout=sp.PIPE,
                 stderr=sp.PIPE,
                 env=env)
             stdout, stderr = process.communicate()
             if process.returncode != 0:
-                log_err.write(stderr.decode('utf-8'))
-                log_err.write('Failed to color IF graphs')
-                exit(501)
+                print('[RECOLORING] retry...')
+                self.gen_coloring()
+                # log_err.write(stderr.decode('utf-8'))
+                # log_err.write('Failed to color IF graphs')
+                # exit(501)
 
-    def benchmark(self):
+    def regalloc(self, i):
+        with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
+            for filename in os.listdir(self.WORKING_DIR):
+                filename = os.path.join(self.WORKING_DIR, filename)
+                if filename.endswith(".ll"):
+                    print(f'[REGALLOC] {filename}')
+                    process = sp.Popen(f'cd {self.WORKING_DIR} && {self.LLC} {self.LLC_RUN_FLAGS} -pp2-isec {i} {filename}',
+                        shell=True,
+                        executable='/bin/bash',
+                        stdout=sp.PIPE,
+                        stderr=sp.PIPE)
+                    stdout, stderr = process.communicate()
+                    if process.returncode != 0:
+                        log_err.write(stderr.decode('utf-8'))
+                        log_err.write(f"Failed to regalloc: {filename}")
+                        exit(601)
+
+    def linking(self):
+        with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
+            print(f'[LINKING] start linking')
+            process = sp.Popen(f'cd {self.WORKING_DIR} && {self.LINKER} {self.linking_files} {self.LINKER_FLAGS} -o {self.BINARY}',
+                shell=True,
+                executable='/bin/bash',
+                stdout=sp.PIPE,
+                stderr=sp.PIPE)
+            stdout, stderr = process.communicate()
+            if process.returncode != 0:
+                log_err.write(stderr.decode('utf-8'))
+                log_err.write(f"Failed to linking")
+                exit(602)
+
+    def benchmark(self, i):
         raise Exception("Not implemented")
+
+    def prepare_statistics(self, i):
+        with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
+            print(f'[PREPARE STATISTICS] prepare statistics')
+            for filename in os.listdir(self.WORKING_DIR):
+                filename = os.path.join(self.WORKING_DIR, filename)
+                if filename.endswith(".ll"):
+                    process = sp.Popen(f'mv {os.path.splitext(filename)[0]}.s {os.path.splitext(filename)[0]}.{i}.s',
+                        shell=True,
+                        executable='/bin/bash',
+                        stdout=sp.PIPE,
+                        stderr=sp.PIPE)
+                    stdout, stderr = process.communicate()
+                    if process.returncode != 0:
+                        log_err.write(stderr.decode('utf-8'))
+                        log_err.write(f"Failed to prepare statistics")
+                        exit(605)
 
     def gen_statistics(self):
+        self.runtime_statistics()
+        self.ise_statistics()
+
+    def runtime_statistics(self):
         raise Exception("Not implemented")
+
+    def ise_statistics(self):
+        with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err, open(f'{self.WORKING_DIR}/ise.csv', 'w') as ise_csv:
+            ise_csv_writer = csv.writer(ise_csv, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+            for i in range(17):
+                csv_row = []
+                total_loc = 0
+                total_spills = 0
+                for filename in os.listdir(self.WORKING_DIR):
+                    filename = os.path.join(self.WORKING_DIR, filename)
+                    if filename.endswith(".ll"):
+                        process = sp.Popen(f'cat {os.path.splitext(filename)[0]}.{i}.s | wc -l',
+                            shell=True,
+                            executable='/bin/bash',
+                            stdout=sp.PIPE,
+                            stderr=sp.PIPE)
+                        stdout, stderr = process.communicate()
+                        if process.returncode != 0:
+                            log_err.write(stderr.decode('utf-8'))
+                            log_err.write(f"Failed to benchmark")
+                            exit(701)
+                        total_loc += int(stdout.decode('utf-8'))
+
+                        process = sp.Popen(f'cat {os.path.splitext(filename)[0]}.{i}.s | rg "\-byte Spill" | wc -l',
+                            shell=True,
+                            executable='/bin/bash',
+                            stdout=sp.PIPE,
+                            stderr=sp.PIPE)
+                        stdout, stderr = process.communicate()
+                        if process.returncode != 0:
+                            log_err.write(stderr.decode('utf-8'))
+                            log_err.write(f"Failed to benchmark")
+                            exit(702)
+                        total_spills += int(stdout.decode('utf-8'))
+                csv_row.append(total_loc)
+                csv_row.append(total_spills)
+                ise_csv_writer.writerow(csv_row)
 
     def cleanup(self):
         print("[CLEANUP] start cleanup")
@@ -146,149 +273,177 @@ class BenchmarkBase():
         self.gen_if_graph()
         self.graph_to_pickle()
         self.gen_coloring()
-        self.benchmark()
+        for i in range(17):
+            print(f'ISEC #{i}:')
+            self.regalloc(i)
+            self.linking()
+            self.benchmark(i)
+            self.prepare_statistics(i)
         self.gen_statistics()
         self.cleanup()
         print("Finished successfully!")
 
-class BenchmarkHarris(BenchmarkBase):
+class GoogleBenchmarkMixin():
+    def benchmark(self, i):
+        with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
+            print(f'[BENCHMARK] start benchmarking')
+            process = sp.Popen(f'cd {self.WORKING_DIR} && ./{self.BINARY} --benchmark_out="{self.WORKING_DIR}/result.{i}.json" --benchmark_out_format=json --benchmark_repetitions=10',
+                shell=True,
+                executable='/bin/bash',
+                stdout=sp.PIPE,
+                stderr=sp.PIPE)
+            stdout, stderr = process.communicate()
+            if process.returncode != 0:
+                log_err.write(stderr.decode('utf-8'))
+                log_err.write(f"Failed to benchmark")
+                exit(603)
+
+    def runtime_statistics(self):
+        with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
+            for benchmark in self.google_benchmarks:
+                with open(f'{self.WORKING_DIR}/runtime_{benchmark["name"]}.csv', 'w') as runtime_csv:
+                    runtime_csv_writer = csv.writer(runtime_csv, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+                    mean_list = []
+                    stddev_list = []
+                    for i in range(17):
+                        with open(f'{self.WORKING_DIR}/result.{i}.json') as f:
+                            data = json.load(f)
+                            for record in data['benchmarks']:
+                                if record['name'] == f"{benchmark['run']}_mean":
+                                    mean_list.append(record['real_time']/10**6)
+                                elif record['name'] == f"{benchmark['run']}_stddev":
+                                    stddev_list.append(record['real_time']/10**6)
+                                else:
+                                    continue
+                    runtime_csv_writer.writerow(mean_list + stddev_list)
+
+class PerfBencharkMixin():
+    def benchmark(self, i):
+        with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
+            print(f'[BENCHMARK] start benchmarking')
+            process = sp.Popen(f'cd {self.WORKING_DIR} && perf stat -B -e cache-references,cache-misses,cycles,instructions,branches,faults,migrations -r 10 -o {self.BINARY}.bench.{i} ./{self.BINARY} {self.BINARY_OPTION} > /dev/null',
+                shell=True,
+                executable='/bin/bash',
+                stdout=sp.PIPE,
+                stderr=sp.PIPE)
+            stdout, stderr = process.communicate()
+            if process.returncode != 0:
+                log_err.write(stderr.decode('utf-8'))
+                log_err.write(f"Failed to benchmark")
+                exit(603)
+
+class BenchmarkHarris(GoogleBenchmarkMixin, BenchmarkBase):
     def __init__(self, path):
         BenchmarkBase.__init__(self, path)
         self.CXX_FLAGS = f'{self.COMMON_FLAGS} -I{self.HOME}/include -std=c++11 -ffast-math'
+        self.LINKER_FLAGS = f'-L{self.HOME}/lib64 -lbenchmark'
+        self.BINARY = 'harris'
+        self.linking_files = 'harrisKernel.s main.s'
+        self.google_benchmarks = [{
+            'name': 'harris',
+            'run': 'BENCHMARK_HARRIS/2048/2048',
+        }]
 
-    def compile(self):
-        with open(f'{self.WORKING_DIR}/log.txt', 'w') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'w') as log_err:
-            for filename in os.listdir(self.WORKING_DIR):
-                filename = os.path.join(self.WORKING_DIR, filename)
-                if filename.endswith(".cpp"):
-                    print(f"[COMPILE] {filename}")
-                    process = sp.Popen(f'cd {self.WORKING_DIR} && {self.CXX} {self.CXX_FLAGS} {filename}',
-                        shell=True,
-                        stdout=sp.PIPE,
-                        stderr=sp.PIPE)
-                    stdout, stderr = process.communicate()
-                    if process.returncode != 0:
-                        log_err.write(stderr.decode('utf-8'))
-                        log_err.write(f"Failed to compile: {filename}")
-                        exit(201)
+class BenchmarkBilateralFiltering(GoogleBenchmarkMixin, BenchmarkBase):
+    def __init__(self, path):
+        BenchmarkBase.__init__(self, path)
+        self.CC_FLAGS = f'{self.COMMON_FLAGS} -I{self.HOME}/include -I../utils'
+        self.CXX_FLAGS = f'{self.COMMON_FLAGS} -I{self.HOME}/include -I../utils'
+        shutil.copy2(f'{self.WORKING_DIR}/../utils/glibc_compat_rand.o', f'{self.WORKING_DIR}')
+        shutil.copy2(f'{self.WORKING_DIR}/../utils/ImageHelper.o', f'{self.WORKING_DIR}')
+        self.LINKER_FLAGS = f'-lm -L{self.HOME}/lib64 -lbenchmark'
 
-    def benchmark(self):
-        with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
-            for i in range(17):
-                print(f'ISEC #{i}:')
-                for filename in os.listdir(self.WORKING_DIR):
-                    filename = os.path.join(self.WORKING_DIR, filename)
-                    if filename.endswith(".ll"):
-                        print(f'[REGALLOC] {filename}')
-                        process = sp.Popen(f'cd {self.WORKING_DIR} && {self.LLC} {self.LLC_RUN_FLAGS} -pp2-isec {i} {filename}',
-                            shell=True,
-                            stdout=sp.PIPE,
-                            stderr=sp.PIPE)
-                        stdout, stderr = process.communicate()
-                        if process.returncode != 0:
-                            log_err.write(stderr.decode('utf-8'))
-                            log_err.write(f"Failed to regalloc: {filename}")
-                            exit(601)
+        self.BINARY = 'BilateralFilter'
+        self.linking_files = 'bilateralFilterKernel.s ImageHelper.o glibc_compat_rand.o main.s'
+        self.google_benchmarks = [{
+            'name': 'bilateral',
+            'run': 'BENCHMARK_BILATERAL_FILTER/64/4'
+        }]
 
-                print(f'[LINKING] start linking')
-                process = sp.Popen(f'cd {self.WORKING_DIR} && {self.LINKER} harrisKernel.s main.s -L{self.HOME}/lib64 -lbenchmark -o harris',
-                    shell=True,
-                    stdout=sp.PIPE,
-                    stderr=sp.PIPE)
-                stdout, stderr = process.communicate()
-                if process.returncode != 0:
-                    log_err.write(stderr.decode('utf-8'))
-                    log_err.write(f"Failed to linking")
-                    exit(602)
+class BenchmarkBlur(GoogleBenchmarkMixin, BenchmarkBase):
+    def __init__(self, path):
+        BenchmarkBase.__init__(self, path)
+        self.CC_FLAGS = f'{self.COMMON_FLAGS} -I{self.HOME}/include -I../utils'
+        self.CXX_FLAGS = f'{self.COMMON_FLAGS} -I{self.HOME}/include -I../utils'
+        shutil.copy2(f'{self.WORKING_DIR}/../utils/glibc_compat_rand.o', f'{self.WORKING_DIR}')
+        shutil.copy2(f'{self.WORKING_DIR}/../utils/ImageHelper.o', f'{self.WORKING_DIR}')
+        self.LINKER_FLAGS = f'-lm -L{self.HOME}/lib64 -lbenchmark'
 
-                print(f'[BENCHMARK] start benchmarking')
-                process = sp.Popen(f'cd {self.WORKING_DIR} && ./harris --benchmark_out="{self.WORKING_DIR}/result.{i}.json" --benchmark_out_format=json --benchmark_repetitions=2',
-                    shell=True,
-                    stdout=sp.PIPE,
-                    stderr=sp.PIPE)
-                stdout, stderr = process.communicate()
-                if process.returncode != 0:
-                    log_err.write(stderr.decode('utf-8'))
-                    log_err.write(f"Failed to benchmark")
-                    exit(603)
+        self.BINARY = 'Blur'
+        self.linking_files = 'boxBlurKernel.s gaussianBlurKernel.s ImageHelper.o glibc_compat_rand.o main.s'
+        self.google_benchmarks = [{
+            'name': 'box',
+            'run': 'BENCHMARK_boxBlurKernel/1024'
+        }, {
+            'name': 'gaussian',
+            'run': 'BENCHMARK_GAUSSIAN_BLUR/1024'
+        }]
 
-                print(f'[PREPARE STATISTICS] prepare statistics')
-                process = sp.Popen(f'mv {self.WORKING_DIR}/stats.json {self.WORKING_DIR}/stats.{i}.json',
-                    shell=True,
-                    stdout=sp.PIPE,
-                    stderr=sp.PIPE)
-                stdout, stderr = process.communicate()
-                if process.returncode != 0:
-                    log_err.write(stderr.decode('utf-8'))
-                    log_err.write(f"Failed to prepare statistics")
-                    exit(604)
+class BenchmarkDilate(GoogleBenchmarkMixin, BenchmarkBase):
+    def __init__(self, path):
+        BenchmarkBase.__init__(self, path)
+        self.CC_FLAGS = f'{self.COMMON_FLAGS} -I{self.HOME}/include -I../utils'
+        self.CXX_FLAGS = f'{self.COMMON_FLAGS} -I{self.HOME}/include -I../utils'
+        shutil.copy2(f'{self.WORKING_DIR}/../utils/glibc_compat_rand.o', f'{self.WORKING_DIR}')
+        shutil.copy2(f'{self.WORKING_DIR}/../utils/ImageHelper.o', f'{self.WORKING_DIR}')
+        self.LINKER_FLAGS = f'-lm -L{self.HOME}/lib64 -lbenchmark'
 
-                for filename in os.listdir(self.WORKING_DIR):
-                    filename = os.path.join(self.WORKING_DIR, filename)
-                    if filename.endswith(".ll"):
-                        process = sp.Popen(f'mv {os.path.splitext(filename)[0]}.s {os.path.splitext(filename)[0]}.{i}.s',
-                            shell=True,
-                            stdout=sp.PIPE,
-                            stderr=sp.PIPE)
-                        stdout, stderr = process.communicate()
-                        if process.returncode != 0:
-                            log_err.write(stderr.decode('utf-8'))
-                            log_err.write(f"Failed to prepare statistics")
-                            exit(605)
+        self.BINARY = 'Dilate'
+        self.linking_files = 'dilateKernel.s ImageHelper.o glibc_compat_rand.o main.s'
+        self.google_benchmarks = [{
+            'name': 'dilate',
+            'run': 'BENCHMARK_DILATE/1024'
+        }]
 
-    def gen_statistics(self):
-        print(f'[STATISTICS] generate statistics')
-        with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err, open(f'{self.WORKING_DIR}/runtime.csv', 'w') as runtime_csv, open(f'{self.WORKING_DIR}/ise.csv', 'w') as ise_csv:
-            # runtime statistics
-            runtime_csv_writer = csv.writer(runtime_csv, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-            mean_list = []
-            stddev_list = []
-            for i in range(17):
-                with open(f'{self.WORKING_DIR}/result.{i}.json') as f:
-                    data = json.load(f)
-                    for record in data['benchmarks']:
-                        if record['name'] == 'BENCHMARK_HARRIS/2048/2048_mean':
-                            mean_list.append(record['real_time']/10**6)
-                        elif record['name'] == 'BENCHMARK_HARRIS/2048/2048_stddev':
-                            stddev_list.append(record['real_time']/10**6)
-                        else:
-                            continue
-            runtime_csv_writer.writerow(mean_list + stddev_list)
+class BenchmarkDither(GoogleBenchmarkMixin, BenchmarkBase):
+    def __init__(self, path):
+        BenchmarkBase.__init__(self, path)
+        self.CC_FLAGS = f'{self.COMMON_FLAGS} -I{self.HOME}/include -I../utils'
+        self.CXX_FLAGS = f'{self.COMMON_FLAGS} -I{self.HOME}/include -I../utils'
+        shutil.copy2(f'{self.WORKING_DIR}/../utils/glibc_compat_rand.o', f'{self.WORKING_DIR}')
+        shutil.copy2(f'{self.WORKING_DIR}/../utils/ImageHelper.o', f'{self.WORKING_DIR}')
+        self.LINKER_FLAGS = f'-lm -L{self.HOME}/lib64 -lbenchmark'
 
-            # ise statistics
-            ise_csv_writer = csv.writer(ise_csv, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-            for i in range(17):
-                csv_row = []
-                with open(f'{self.WORKING_DIR}/stats.{i}.json') as f:
-                    data = json.load(f)
-                    csv_row.append(data.get("regalloc.NumMISNodes", None))
-                    csv_row.append(data.get("regalloc.NumSkippedNodes",None))
-                    csv_row.append(data.get("regalloc.NumSplittedOrEvictedVRegsAllocatedByPP2", None))
-                for filename in os.listdir(self.WORKING_DIR):
-                    filename = os.path.join(self.WORKING_DIR, filename)
-                    if filename.endswith(".ll"):
-                        process = sp.Popen(f'cat {os.path.splitext(filename)[0]}.{i}.s | wc -l',
-                            shell=True,
-                            stdout=sp.PIPE,
-                            stderr=sp.PIPE)
-                        stdout, stderr = process.communicate()
-                        if process.returncode != 0:
-                            log_err.write(stderr.decode('utf-8'))
-                            log_err.write(f"Failed to benchmark")
-                            exit(701)
-                        csv_row.append(int(stdout.decode('utf-8')))
+        self.BINARY = 'Dither'
+        self.linking_files = 'floydDitherKernel.s orderedDitherKernel.s ImageHelper.o glibc_compat_rand.o main.s'
+        self.google_benchmarks = [{
+            'name': 'floyd',
+            'run': 'BENCHMARK_FLOYD_DITHER/512'
+        }, {
+            'name': 'ordered',
+            'run': 'BENCHMARK_ORDERED_DITHER/512/8'
+        }]
 
-                        process = sp.Popen(f'cat {os.path.splitext(filename)[0]}.{i}.s | rg "\-byte Spill" | wc -l',
-                            shell=True,
-                            stdout=sp.PIPE,
-                            stderr=sp.PIPE)
-                        stdout, stderr = process.communicate()
-                        if process.returncode != 0:
-                            log_err.write(stderr.decode('utf-8'))
-                            log_err.write(f"Failed to benchmark")
-                            exit(702)
-                        csv_row.append(int(stdout.decode('utf-8')))
-                ise_csv_writer.writerow(csv_row)
+class BenchmarkInterpolation(GoogleBenchmarkMixin, BenchmarkBase):
+    def __init__(self, path):
+        BenchmarkBase.__init__(self, path)
+        self.CC_FLAGS = f'{self.COMMON_FLAGS} -I{self.HOME}/include -I../utils'
+        self.CXX_FLAGS = f'{self.COMMON_FLAGS} -I{self.HOME}/include -I../utils'
+        shutil.copy2(f'{self.WORKING_DIR}/../utils/glibc_compat_rand.o', f'{self.WORKING_DIR}')
+        shutil.copy2(f'{self.WORKING_DIR}/../utils/ImageHelper.o', f'{self.WORKING_DIR}')
+        self.LINKER_FLAGS = f'-lm -L{self.HOME}/lib64 -lbenchmark'
+
+        self.BINARY = 'Interpolation'
+        self.linking_files = 'bicubicKernel.s bilinearKernel.s ImageHelper.o glibc_compat_rand.o main.s'
+        self.google_benchmarks = [{
+            'name': 'bicubic',
+            'run': 'BENCHMARK_BICUBIC_INTERPOLATION/256'
+        }, {
+            'name': 'bilinear',
+            'run': 'BENCHMARK_BILINEAR_INTERPOLATION/256'
+        }]
+
+# class BenchmarkOldenBh(BenchmarkBase, PerfBencharkMixin):
+#     def __init__(self, path):
+#         BenchmarkBase.__init__(self, path)
+#         self.CC_FLAGS = f'{self.COMMON_FLAGS} -fcommon -DTORONTO'
+#         self.LINKER_FLAGS = 'lm'
+#         self.BINARY = 'bh'
+#         self.BINARY_OPTION = '40000 30'
+
+#     def runtime_statistics(self):
+#         # TODO
+#         pass
 
 @click.command()
 @click.option('--path', help='benchmark path')
@@ -296,6 +451,16 @@ class BenchmarkHarris(BenchmarkBase):
 def run(path, benchmark):
     if benchmark == 'harris':
         BenchmarkHarris(path).run()
+    elif benchmark == 'BilateralFiltering':
+        BenchmarkBilateralFiltering(path).run()
+    elif benchmark == 'Blur':
+        BenchmarkBlur(path).run()
+    elif benchmark == 'Dilate':
+        BenchmarkDilate(path).run()
+    elif benchmark == 'Dither':
+        BenchmarkDither(path).run()
+    elif benchmark == 'Interpolation':
+        BenchmarkInterpolation(path).run()
     else:
         pass
 

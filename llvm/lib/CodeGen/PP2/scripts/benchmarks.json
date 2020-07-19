@@ -1,0 +1,37 @@
+[{
+  "name": "harris",
+  "path": "/home/ywshin/test-suite/MicroBenchmarks/harris",
+  "csv_name": "runtime_harris.csv"
+}, {
+  "name": "bilateral filtering",
+  "path": "/home/ywshin/test-suite/MicroBenchmarks/ImageProcessing/BilateralFiltering",
+  "csv_name": "runtime_bilateral.csv"
+}, {
+  "name": "box blur",
+  "path": "/home/ywshin/test-suite/MicroBenchmarks/ImageProcessing/Blur",
+  "csv_name": "runtime_box.csv"
+}, {
+  "name": "gaussian blur",
+  "path": "/home/ywshin/test-suite/MicroBenchmarks/ImageProcessing/Blur",
+  "csv_name": "runtime_gaussian.csv"
+}, {
+  "name": "dilate",
+  "path": "/home/ywshin/test-suite/MicroBenchmarks/ImageProcessing/Dilate",
+  "csv_name": "runtime_dilate.csv"
+}, {
+  "name": "floyd dither",
+  "path": "/home/ywshin/test-suite/MicroBenchmarks/ImageProcessing/Dither",
+  "csv_name": "runtime_floyd.csv"
+}, {
+  "name": "ordered dither",
+  "path": "/home/ywshin/test-suite/MicroBenchmarks/ImageProcessing/Dither",
+  "csv_name": "runtime_ordered.csv"
+}, {
+  "name": "bicubic interpolation",
+  "path": "/home/ywshin/test-suite/MicroBenchmarks/ImageProcessing/Interpolation",
+  "csv_name": "runtime_bicubic.csv"
+}, {
+  "name": "bilinear interpolation",
+  "path": "/home/ywshin/test-suite/MicroBenchmarks/ImageProcessing/Interpolation",
+  "csv_name": "runtime_bilinear.csv"
+}]
