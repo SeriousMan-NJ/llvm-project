@@ -37,7 +37,6 @@ def run(path, benchmark, csv_name):
     fig, ax = plt.subplots()
     rects_list = []
     for i in range(17):
-        # errorbar(np.transpose(stddevs_normalized)[i]
         ax.bar(x - (8 - i)*width/17, np.transpose(means_normalized)[i], width/17, label=i, lw=0.1, yerr=np.transpose(stddevs_normalized)[i], error_kw=dict(ecolor='gray', lw=0.15, capsize=0.75, capthick=0.15))
         rects_list.append(ax)
 
@@ -49,7 +48,7 @@ def run(path, benchmark, csv_name):
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
     ax.grid(True, axis='y', alpha=1, lw=0.2)
-    # ax.legend(ncol=2)
+    ax.legend(loc='best', fontsize='xx-small', ncol=2)
     plt.setp(ax.get_xticklabels(), rotation=60, horizontalalignment='right')
 
     fig.tight_layout()

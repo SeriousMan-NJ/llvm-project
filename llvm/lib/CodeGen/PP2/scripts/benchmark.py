@@ -37,6 +37,7 @@ class BenchmarkBase():
         self.LLC_RUN_FLAGS = f'-O3 -filetype=asm -regalloc pp2 -pp2-regalloc {self.BACKEND_REGALLOC} -stats -stats-json-file'
 
         self.CONDA_S2V_DQN_ENV = 'py27'
+        self.CONDA_MAX_APPROX_ENV = 'py37'
 
     def setup(self):
         os.system(f'rm -rf {self.WORKING_DIR}/tmp')
@@ -100,8 +101,8 @@ class BenchmarkBase():
                 log_err.write('Failed to convert IF graphs to pickle')
                 exit(401)
 
-    def gen_coloring(self):
-        print("[COLORING] start coloring")
+    def gen_coloring_s2v_dqn(self):
+        print("[COLORING: S2V-DQN] start coloring")
         g_type='erdos_renyi'
         # g_type='barabasi_albert'
         data_test='dummy'
@@ -160,10 +161,39 @@ class BenchmarkBase():
             stdout, stderr = process.communicate()
             if process.returncode != 0:
                 print('[RECOLORING] retry...')
-                self.gen_coloring()
+                self.gen_coloring_s2v_dqn()
                 # log_err.write(stderr.decode('utf-8'))
                 # log_err.write('Failed to color IF graphs')
                 # exit(501)
+
+    def gen_coloring_max_approx(self):
+        print("[COLORING: MAX-APPROX] start coloring")
+        data_dir=self.WORKING_DIR
+        output_dir=self.WORKING_DIR
+        isec=16
+        evaluate=f"""python mvc_approx_greedy.py \
+            --data-dir {data_dir} \
+            --output-dir {output_dir} \
+            --isec {isec}"""
+        with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
+            process = sp.Popen(f'source {self.HOME}/.bash_profile && source {self.HOME}/anaconda3/etc/profile.d/conda.sh && conda activate {self.CONDA_MAX_APPROX_ENV} && cd {self.HOME}/llvm-project/llvm/lib/CodeGen/PP2/scripts && {evaluate}',
+                shell=True,
+                executable='/bin/bash',
+                stdout=sp.PIPE,
+                stderr=sp.PIPE)
+            stdout, stderr = process.communicate()
+            if process.returncode != 0:
+                print('[RECOLORING] retry...')
+                self.gen_coloring_max_approx()
+                # log_err.write(stderr.decode('utf-8'))
+                # log_err.write('Failed to color IF graphs')
+                # exit(501)
+
+    def gen_coloring(self, mis_heuristic):
+        if mis_heuristic == 's2v-dqn':
+            self.gen_coloring_s2v_dqn()
+        elif mis_heuristic == 'max-approx':
+            self.gen_coloring_max_approx()
 
     def regalloc(self, i):
         with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
@@ -267,12 +297,12 @@ class BenchmarkBase():
             if len(filename.split('.')) >= 3 and (filename.split('.')[1] == 'll' or filename.split('.')[-1] == 's' or filename.split('.')[-1] == 'json'):
                 shutil.move(f'{self.WORKING_DIR}/{filename}', f'{self.WORKING_DIR}/tmp/{filename}')
 
-    def run(self):
+    def run(self, mis_heuristic):
         self.setup()
         self.compile()
         self.gen_if_graph()
         self.graph_to_pickle()
-        self.gen_coloring()
+        self.gen_coloring(mis_heuristic)
         for i in range(17):
             print(f'ISEC #{i}:')
             self.regalloc(i)
@@ -448,19 +478,20 @@ class BenchmarkInterpolation(GoogleBenchmarkMixin, BenchmarkBase):
 @click.command()
 @click.option('--path', help='benchmark path')
 @click.option('--benchmark', help='benchmark type')
-def run(path, benchmark):
+@click.option('--mis-heuristic', default='s2v-dqn', help='MIS heuristic')
+def run(path, benchmark, mis_heuristic):
     if benchmark == 'harris':
-        BenchmarkHarris(path).run()
+        BenchmarkHarris(path).run(mis_heuristic)
     elif benchmark == 'BilateralFiltering':
-        BenchmarkBilateralFiltering(path).run()
+        BenchmarkBilateralFiltering(path).run(mis_heuristic)
     elif benchmark == 'Blur':
-        BenchmarkBlur(path).run()
+        BenchmarkBlur(path).run(mis_heuristic)
     elif benchmark == 'Dilate':
-        BenchmarkDilate(path).run()
+        BenchmarkDilate(path).run(mis_heuristic)
     elif benchmark == 'Dither':
-        BenchmarkDither(path).run()
+        BenchmarkDither(path).run(mis_heuristic)
     elif benchmark == 'Interpolation':
-        BenchmarkInterpolation(path).run()
+        BenchmarkInterpolation(path).run(mis_heuristic)
     else:
         pass
 
