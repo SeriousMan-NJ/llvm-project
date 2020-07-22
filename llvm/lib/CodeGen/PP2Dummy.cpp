@@ -179,7 +179,7 @@ namespace {
     SmallPtrSet<MachineInstr *, 32> DeadRemats;
 
     /// Finds the initial set of vreg intervals to allocate.
-    void findVRegIntervalsToAlloc(const MachineFunction &F, LiveIntervals &LIS);
+    void findVRegIntervalsToAlloc(const MachineFunction &F);
 
     /// Constructs an initial graph.
     void initializeGraph(PP2::Graph &G, VirtRegMap &VRM, Spiller &VRegSpiller);
@@ -245,8 +245,7 @@ char PP2Dummy::ID = 0;
 
 FunctionPass *llvm::createPP2DummyPass() { return new PP2Dummy(); }
 
-void PP2Dummy::findVRegIntervalsToAlloc(const MachineFunction &MF,
-                                          LiveIntervals &LIS) {
+void PP2Dummy::findVRegIntervalsToAlloc(const MachineFunction &MF) {
   const MachineRegisterInfo &MRI = MF.getRegInfo();
 
   // Iterate over all live ranges.
@@ -292,7 +291,7 @@ void PP2::Graph::dump(raw_ostream &OS) const {
   const MachineRegisterInfo &MRI = MF.getRegInfo();
   const TargetRegisterInfo *TRI = MRI.getTargetRegisterInfo();
   for (auto N : Nodes) {
-    OS << N.NId << " (" << printReg(N.VReg, TRI) << ")" << ": ";
+    OS << N.NId << " (" << printReg(N.VReg, TRI) << "; " << LIS.getInterval(N.VReg).weight << ")" << ": ";
     for (auto AdjN : N.adjNodes) {
       OS << AdjN << " ";
     }
@@ -386,14 +385,21 @@ void PP2Dummy::coloringMIS(PP2::Graph &G, std::string ExportGraphFileName, int i
 }
 
 void PP2Dummy::printPRegToVRegs(const MachineFunction &MF) {
+  const Function &F = MF.getFunction();
+  std::string FullyQualifiedName =
+    F.getParent()->getModuleIdentifier() + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
+
   const MachineRegisterInfo &MRI = MF.getRegInfo();
   const TargetRegisterInfo *TRI = MRI.getTargetRegisterInfo();
   std::error_code EC;
-  raw_fd_ostream OS("preg2vregs.json", EC, sys::fs::OF_Text);
+  std::stringstream name;
+  name << "preg2vregs." << PP2DummyIndependentSetExtractionCount << "." << FullyQualifiedName << ".json";
+  raw_fd_ostream OS(name.str(), EC, sys::fs::OF_Text);
 
   OS << "{\n";
   const char *delim = "";
   const char *delim2 = "";
+  unsigned num_of_virtuals = 0;
   for (auto const& m : PRegToVRegs) {
     OS << delim;
     OS << "\t\"" << printReg(m.first, TRI) << "\": [";
@@ -402,10 +408,12 @@ void PP2Dummy::printPRegToVRegs(const MachineFunction &MF) {
       OS << delim2;
       OS << "\"" << printReg(VReg, TRI) << "\"";
       delim2 = ",";
+      num_of_virtuals++;
     }
     OS << "]";
     delim = ",\n";
   }
+  OS << ",\n\t\"" << "num_of_virtuals" << "\": " << num_of_virtuals;
   OS << "\n}\n";
   OS.flush();
 }
@@ -438,8 +446,10 @@ bool PP2Dummy::runOnMachineFunction(MachineFunction &MF) {
   errs() << "[PP2] Dummy start!\n";
   errs() << "[PP2] Current function: " << MF.getFunction().getName().str() << "\n";
 
+  calculateSpillWeightsAndHints(*LIS, MF, VRM, *Loops, *MBFI);
+
   // Find the vreg intervals in need of allocation.
-  findVRegIntervalsToAlloc(MF, *LIS);
+  findVRegIntervalsToAlloc(MF);
 
 #ifndef NDEBUG
   const Function &F = MF.getFunction();

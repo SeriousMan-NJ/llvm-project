@@ -144,8 +144,8 @@ static cl::opt<bool> ConsiderLocalIntervalCost(
              "candidate when choosing the best split candidate."),
     cl::init(false));
 
-static cl::opt<bool> ViewCFG(
-    "view-cfg", cl::NotHidden,
+static cl::opt<bool> GreedyViewCFG(
+    "greedy-view-cfg", cl::NotHidden,
     cl::desc("Show CFG before and after register allocation"),
     cl::Hidden, cl::init(false));
 
@@ -2896,7 +2896,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
 }
 
 bool RAGreedy::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, LiveIntervals &lis, LiveRegMatrix &matrix, SlotIndexes* indexes, MachineBlockFrequencyInfo* mbfi, MachineDominatorTree* domtree, MachineOptimizationRemarkEmitter* ore, MachineLoopInfo* loops, EdgeBundles* bundles, SpillPlacement* spillplacer, LiveDebugVariables* debugvars, AAResults* aa, Spiller* spiller, RegSet vRegsAllocated, RegMap *pRegToVRegs) {
-  if (ViewCFG)
+  if (GreedyViewCFG)
     mf.viewCFG();
 
   errs() << "[GREEDY REGISTER ALLOCATION]\n";
@@ -2959,7 +2959,7 @@ bool RAGreedy::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, 
 
   releaseMemory();
 
-  if (ViewCFG)
+  if (GreedyViewCFG)
     mf.viewCFG();
 
   VRegsAllocated.clear();
