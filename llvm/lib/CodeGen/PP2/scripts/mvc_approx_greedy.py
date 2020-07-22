@@ -39,8 +39,9 @@ def run(data_dir, output_dir, isec):
         if filename.endswith(".export.pp2graph.pkl"):
             filepath = f"{data_dir}/{filename}"
             with open(filepath, 'rb') as f:
-                g = cp.load(f)
-                g = nx.convert_node_labels_to_integers(g)
+                g = nx.read_gpickle(f)
+                mapping = {n: int(n) for n in g.nodes}
+                g = nx.relabel_nodes(g, mapping)
                 for i in range(isec):
                     frac = 0
                     filename = re.sub('\.pkl$', '', filename)
