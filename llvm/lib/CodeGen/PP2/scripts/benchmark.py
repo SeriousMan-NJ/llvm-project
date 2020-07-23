@@ -28,7 +28,7 @@ class BenchmarkBase():
         self.LINKER_FLAGS = ''
 
         self.BINARY = 'a.out'
-        self.BINARY_OPTION = ''
+        self.BINARY_OPTIONS = ''
 
         self.BACKEND_REGALLOC = 'greedy'
 
@@ -39,8 +39,12 @@ class BenchmarkBase():
         self.CONDA_S2V_DQN_ENV = 'py27'
         self.CONDA_MAX_APPROX_ENV = 'py37'
 
+        self.ISEC = 16
+        self.BENCHMARK_REPETITION = 10
+
     def setup(self):
         os.system(f'rm -rf {self.WORKING_DIR}/tmp')
+        pass
 
     def compile(self):
         with open(f'{self.WORKING_DIR}/log.txt', 'w') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'w') as log_err:
@@ -108,7 +112,7 @@ class BenchmarkBase():
         data_test='dummy'
         data_dir=self.WORKING_DIR
         output_dir=self.WORKING_DIR
-        isec=16
+        isec=self.ISEC
         result_root=f'results/dqn-{g_type}'
         max_bp_iter=5
         embed_dim=64
@@ -170,7 +174,7 @@ class BenchmarkBase():
         print("[COLORING: MAX-APPROX] start coloring")
         data_dir=self.WORKING_DIR
         output_dir=self.WORKING_DIR
-        isec=16
+        isec=self.ISEC
         evaluate=f"""python mvc_approx_greedy.py \
             --data-dir {data_dir} \
             --output-dir {output_dir} \
@@ -215,7 +219,7 @@ class BenchmarkBase():
 
     def linking(self):
         with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
-            print(f'[LINKING] start linking')
+            print(f'[LINKING: {self.BINARY}] start linking')
             process = sp.Popen(f'cd {self.WORKING_DIR} && {self.LINKER} {self.linking_files} {self.LINKER_FLAGS} -o {self.BINARY}',
                 shell=True,
                 executable='/bin/bash',
@@ -255,9 +259,9 @@ class BenchmarkBase():
         raise Exception("Not implemented")
 
     def ise_statistics(self):
-        with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err, open(f'{self.WORKING_DIR}/ise.csv', 'w') as ise_csv:
+        with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err, open(f'{self.WORKING_DIR}/ise_{self.BINARY}.csv', 'w') as ise_csv:
             ise_csv_writer = csv.writer(ise_csv, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-            for i in range(17):
+            for i in range(self.ISEC + 1):
                 csv_row = []
                 total_loc = 0
                 total_spills = 0
@@ -295,7 +299,7 @@ class BenchmarkBase():
         print("[CLEANUP] start cleanup")
         os.makedirs(f'{self.WORKING_DIR}/tmp', exist_ok=True)
         for filename in os.listdir(self.WORKING_DIR):
-            if len(filename.split('.')) >= 3 and (filename.split('.')[1] == 'll' or filename.split('.')[-1] == 's' or filename.split('.')[-1] == 'json'):
+            if len(filename.split('.')) >= 3 and (filename.split('.')[1] == 'll' or filename.split('.')[-1] == 's' or filename.split('.')[-1] == 'json') or len(filename.split('.')) >= 3 and filename.split('.')[-2] == 'bench':
                 shutil.move(f'{self.WORKING_DIR}/{filename}', f'{self.WORKING_DIR}/tmp/{filename}')
 
     def run(self, mis_heuristic):
@@ -304,7 +308,7 @@ class BenchmarkBase():
         self.gen_if_graph()
         self.graph_to_pickle()
         self.gen_coloring(mis_heuristic)
-        for i in range(17):
+        for i in range(self.ISEC + 1):
             print(f'ISEC #{i}:')
             self.regalloc(i)
             self.linking()
@@ -317,8 +321,8 @@ class BenchmarkBase():
 class GoogleBenchmarkMixin():
     def benchmark(self, i):
         with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
-            print(f'[BENCHMARK] start benchmarking')
-            process = sp.Popen(f'cd {self.WORKING_DIR} && ./{self.BINARY} --benchmark_out="{self.WORKING_DIR}/result.{i}.json" --benchmark_out_format=json --benchmark_repetitions=10',
+            print(f'[BENCHMARK: {self.BINARY}] start benchmarking')
+            process = sp.Popen(f'cd {self.WORKING_DIR} && ./{self.BINARY} --benchmark_out="{self.WORKING_DIR}/result.{i}.json" --benchmark_out_format=json --benchmark_repetitions={self.BENCHMARK_REPETITION}',
                 shell=True,
                 executable='/bin/bash',
                 stdout=sp.PIPE,
@@ -336,7 +340,7 @@ class GoogleBenchmarkMixin():
                     runtime_csv_writer = csv.writer(runtime_csv, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
                     mean_list = []
                     stddev_list = []
-                    for i in range(17):
+                    for i in range(self.ISEC + 1):
                         with open(f'{self.WORKING_DIR}/result.{i}.json') as f:
                             data = json.load(f)
                             for record in data['benchmarks']:
@@ -351,8 +355,8 @@ class GoogleBenchmarkMixin():
 class PerfBencharkMixin():
     def benchmark(self, i):
         with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
-            print(f'[BENCHMARK] start benchmarking')
-            process = sp.Popen(f'cd {self.WORKING_DIR} && perf stat -B -e cache-references,cache-misses,cycles,instructions,branches,faults,migrations -r 10 -o {self.BINARY}.bench.{i} ./{self.BINARY} {self.BINARY_OPTION} > /dev/null',
+            print(f'[BENCHMARK: {self.BINARY}] start benchmarking')
+            process = sp.Popen(f'cd {self.WORKING_DIR} && perf stat -B -e cache-references,cache-misses,cycles,instructions,branches,faults,migrations -r {self.BENCHMARK_REPETITION} -o {self.BINARY}.bench.{i} ./{self.BINARY} {self.BINARY_OPTIONS} > /dev/null',
                 shell=True,
                 executable='/bin/bash',
                 stdout=sp.PIPE,
@@ -362,6 +366,45 @@ class PerfBencharkMixin():
                 log_err.write(stderr.decode('utf-8'))
                 log_err.write(f"Failed to benchmark")
                 exit(603)
+
+    def runtime_statistics(self):
+        with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err, open(f'{self.WORKING_DIR}/runtime_{self.BINARY}.csv', 'w') as runtime_csv:
+            runtime_csv_writer = csv.writer(runtime_csv, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+            mean_list = []
+            stddev_list = []
+            for i in range(self.ISEC + 1):
+                with open(f'{self.WORKING_DIR}/{self.BINARY}.bench.{i}', 'r') as f:
+                    for line in f:
+                        if "time elapsed" in line:
+                            line = line.strip().split()
+                            mean_list.append(line[0])
+                            stddev_list.append(line[2])
+            runtime_csv_writer.writerow(mean_list + stddev_list)
+
+class SingleSourceBenchmarkMixin(PerfBencharkMixin):
+    def benchmark(self, i):
+        for BINARY, BINARY_OPTIONS in self.BINARIES:
+            self.BINARY = BINARY
+            self.BINARY_OPTIONS = BINARY_OPTIONS
+            super().benchmark(i)
+
+    def linking(self):
+        for i, linking_files in enumerate(self.linking_files_list):
+            self.BINARY, self.BINARY_OPTIONS = self.BINARIES[i]
+            self.linking_files = linking_files
+            super().linking()
+
+    def runtime_statistics(self):
+        for BINARY, BINARY_OPTIONS in self.BINARIES:
+            self.BINARY = BINARY
+            self.BINARY_OPTIONS = BINARY_OPTIONS
+            super().runtime_statistics()
+
+    def ise_statistics(self):
+        for BINARY, BINARY_OPTIONS in self.BINARIES:
+            self.BINARY = BINARY
+            self.BINARY_OPTIONS = BINARY_OPTIONS
+            super().ise_statistics()
 
 class BenchmarkHarris(GoogleBenchmarkMixin, BenchmarkBase):
     def __init__(self, path):
@@ -464,17 +507,68 @@ class BenchmarkInterpolation(GoogleBenchmarkMixin, BenchmarkBase):
             'run': 'BENCHMARK_BILINEAR_INTERPOLATION/256'
         }]
 
-# class BenchmarkOldenBh(BenchmarkBase, PerfBencharkMixin):
-#     def __init__(self, path):
-#         BenchmarkBase.__init__(self, path)
-#         self.CC_FLAGS = f'{self.COMMON_FLAGS} -fcommon -DTORONTO'
-#         self.LINKER_FLAGS = 'lm'
-#         self.BINARY = 'bh'
-#         self.BINARY_OPTION = '40000 30'
+class BenchmarkOldenBh(PerfBencharkMixin, BenchmarkBase):
+    def __init__(self, path):
+        BenchmarkBase.__init__(self, path)
+        self.CC_FLAGS = f'{self.COMMON_FLAGS} -fcommon -DTORONTO'
+        self.LINKER = 'clang'
+        self.LINKER_FLAGS = '-lm'
+        self.BINARY = 'bh'
+        self.BINARY_OPTIONS = '40000 30'
+        self.linking_files = 'args.s newbh.s util.s walksub.s'
 
-#     def runtime_statistics(self):
-#         # TODO
-#         pass
+class BenchmarkOldenBisort(PerfBencharkMixin, BenchmarkBase):
+    def __init__(self, path):
+        BenchmarkBase.__init__(self, path)
+        self.CC_FLAGS = f'{self.COMMON_FLAGS} -DTORONTO'
+        self.LINKER = 'clang'
+        self.LINKER_FLAGS = '-lm'
+        self.BINARY = 'bisort'
+        self.BINARY_OPTIONS = '3000000'
+        self.linking_files = 'args.s bitonic.s'
+
+class BenchmarkOldenHealth(PerfBencharkMixin, BenchmarkBase):
+    def __init__(self, path):
+        BenchmarkBase.__init__(self, path)
+        self.CC_FLAGS = f'{self.COMMON_FLAGS} -DTORONTO'
+        self.LINKER = 'clang'
+        self.LINKER_FLAGS = '-lm'
+        self.BINARY = 'health'
+        self.BINARY_OPTIONS = '10 40 1'
+        self.linking_files = 'args.s health.s list.s poisson.s'
+
+class BenchmarkOldenMst(PerfBencharkMixin, BenchmarkBase):
+    def __init__(self, path):
+        BenchmarkBase.__init__(self, path)
+        self.CC_FLAGS = f'{self.COMMON_FLAGS} -DTORONTO'
+        self.LINKER = 'clang'
+        self.LINKER_FLAGS = ''
+        self.BINARY = 'mst'
+        self.BINARY_OPTIONS = '4000'
+        self.linking_files = 'args.s hash.s main.s makegraph.s'
+
+class BenchmarkOldenTsp(PerfBencharkMixin, BenchmarkBase):
+    def __init__(self, path):
+        BenchmarkBase.__init__(self, path)
+        self.CC_FLAGS = f'{self.COMMON_FLAGS} -DTORONTO'
+        self.LINKER = 'clang'
+        self.LINKER_FLAGS = '-lm'
+        self.BINARY = 'tsp'
+        self.BINARY_OPTIONS = '2048000'
+        self.linking_files = 'args.s build.s main.s tsp.s'
+
+class BenchmarkMcGill(SingleSourceBenchmarkMixin, BenchmarkBase):
+    def __init__(self, path):
+        BenchmarkBase.__init__(self, path)
+        self.CC_FLAGS = f'{self.COMMON_FLAGS}'
+        self.LINKER = 'clang'
+        self.LINKER_FLAGS = '-lm'
+        self.BINARIES = [
+            ('chomp', ''),
+            ('queens', ''),
+            ('misr', '')
+        ]
+        self.linking_files_list = ['chomp.s', 'queens.s', 'misr.s']
 
 @click.command()
 @click.option('--path', help='benchmark path')
@@ -493,6 +587,18 @@ def run(path, benchmark, mis_heuristic):
         BenchmarkDither(path).run(mis_heuristic)
     elif benchmark == 'Interpolation':
         BenchmarkInterpolation(path).run(mis_heuristic)
+    elif benchmark == 'olden/bh':
+        BenchmarkOldenBh(path).run(mis_heuristic)
+    elif benchmark == 'olden/bisort':
+        BenchmarkOldenBisort(path).run(mis_heuristic)
+    elif benchmark == 'olden/health':
+        BenchmarkOldenHealth(path).run(mis_heuristic)
+    elif benchmark == 'olden/mst':
+        BenchmarkOldenMst(path).run(mis_heuristic)
+    elif benchmark == 'olden/tsp':
+        BenchmarkOldenTsp(path).run(mis_heuristic)
+    elif benchmark == 'mcgill':
+        BenchmarkMcGill(path).run(mis_heuristic)
     else:
         pass
 

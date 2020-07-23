@@ -34,4 +34,36 @@
   "name": "bilinear interpolation",
   "path": "/home/ywshin/test-suite/MicroBenchmarks/ImageProcessing/Interpolation",
   "csv_name": "runtime_bilinear.csv"
+}, {
+  "name": "Olden/bh",
+  "path": "/home/ywshin/test-suite/MultiSource/Benchmarks/Olden/bh",
+  "csv_name": "runtime_bh.csv"
+}, {
+  "name": "Olden/bisort",
+  "path": "/home/ywshin/test-suite/MultiSource/Benchmarks/Olden/bisort",
+  "csv_name": "runtime_bisort.csv"
+}, {
+  "name": "Olden/health",
+  "path": "/home/ywshin/test-suite/MultiSource/Benchmarks/Olden/health",
+  "csv_name": "runtime_health.csv"
+}, {
+  "name": "Olden/mst",
+  "path": "/home/ywshin/test-suite/MultiSource/Benchmarks/Olden/mst",
+  "csv_name": "runtime_mst.csv"
+}, {
+  "name": "Olden/tsp",
+  "path": "/home/ywshin/test-suite/MultiSource/Benchmarks/Olden/tsp",
+  "csv_name": "runtime_tsp.csv"
+}, {
+  "name": "McGill/chomp",
+  "path": "/home/ywshin/test-suite/SingleSource/Benchmarks/McGill",
+  "csv_name": "runtime_chomp.csv"
+}, {
+  "name": "McGill/misr",
+  "path": "/home/ywshin/test-suite/SingleSource/Benchmarks/McGill",
+  "csv_name": "runtime_misr.csv"
+}, {
+  "name": "McGill/queens",
+  "path": "/home/ywshin/test-suite/SingleSource/Benchmarks/McGill",
+  "csv_name": "runtime_queens.csv"
 }]
