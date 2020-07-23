@@ -174,7 +174,8 @@ class BenchmarkBase():
         evaluate=f"""python mvc_approx_greedy.py \
             --data-dir {data_dir} \
             --output-dir {output_dir} \
-            --isec {isec}"""
+            --isec {isec} \
+            --use-node-weights 0"""
         with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
             process = sp.Popen(f'source {self.HOME}/.bash_profile && source {self.HOME}/anaconda3/etc/profile.d/conda.sh && conda activate {self.CONDA_MAX_APPROX_ENV} && cd {self.HOME}/llvm-project/llvm/lib/CodeGen/PP2/scripts && {evaluate}',
                 shell=True,

@@ -309,6 +309,18 @@ void PP2::Graph::exportToNetworkx(raw_ostream &OS) const {
   }
 }
 
+void PP2::Graph::exportNodeWeights(raw_ostream &OS) const {
+  const char *delim = "";
+  OS << "{\n";
+  for (auto N : Nodes) {
+    OS << delim;
+    OS << "\t\"" << N.NId << "\": \"" << LIS.getInterval(N.VReg).weight << "\"";
+    delim = ",\n";
+  }
+  OS << "\n}\n";
+  OS.flush();
+}
+
 void PP2Dummy::coloring(PP2::Graph &G, std::string ExportGraphFileName) {
   if (!PP2DummySkip) {
     coloringMIS(G, ExportGraphFileName, PP2DummyIndependentSetExtractionCount);
@@ -477,6 +489,13 @@ bool PP2Dummy::runOnMachineFunction(MachineFunction &MF) {
     LLVM_DEBUG(dbgs() << "Exporting graph to \""
                       << GraphFileName << "\"\n");
     G.exportToNetworkx(OS);
+
+    std::string NodeWeightFileName = FullyQualifiedName + ".export.nw.json";
+    std::error_code EC2;
+    raw_fd_ostream OS2(NodeWeightFileName, EC2, sys::fs::OF_Text);
+    LLVM_DEBUG(dbgs() << "Exporting graph to \""
+                      << NodeWeightFileName << "\"\n");
+    G.exportNodeWeights(OS2);
   }
 #endif
   std::string ExportGraphFileName = FullyQualifiedName + ".export.pp2graph.clr";
