@@ -8,4 +8,5 @@ a.out
 *\.clr\.[0-9]*
 stats.json
 preg2vregs.json
+*.export.nw.json
 
