@@ -170,8 +170,8 @@ class BenchmarkBase():
                 # log_err.write('Failed to color IF graphs')
                 # exit(501)
 
-    def gen_coloring_max_approx(self):
-        print("[COLORING: MAX-APPROX] start coloring")
+    def gen_coloring_max_approx(self, cost_model):
+        print(f"[COLORING: MAX-APPROX-{cost_model}] start coloring")
         data_dir=self.WORKING_DIR
         output_dir=self.WORKING_DIR
         isec=self.ISEC
@@ -179,7 +179,7 @@ class BenchmarkBase():
             --data-dir {data_dir} \
             --output-dir {output_dir} \
             --isec {isec} \
-            --use-node-weights 0"""
+            --cost-model {cost_model}"""
         with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:
             process = sp.Popen(f'source {self.HOME}/.bash_profile && source {self.HOME}/anaconda3/etc/profile.d/conda.sh && conda activate {self.CONDA_MAX_APPROX_ENV} && cd {self.HOME}/llvm-project/llvm/lib/CodeGen/PP2/scripts && {evaluate}',
                 shell=True,
@@ -198,7 +198,11 @@ class BenchmarkBase():
         if mis_heuristic == 's2v-dqn':
             self.gen_coloring_s2v_dqn()
         elif mis_heuristic == 'max-approx':
-            self.gen_coloring_max_approx()
+            self.gen_coloring_max_approx(1)
+        elif mis_heuristic == 'max-approx-2':
+            self.gen_coloring_max_approx(2)
+        elif mis_heuristic == 'max-approx-3':
+            self.gen_coloring_max_approx(3)
 
     def regalloc(self, i):
         with open(f'{self.WORKING_DIR}/log.txt', 'a') as log_out, open(f'{self.WORKING_DIR}/err.txt', 'a') as log_err:

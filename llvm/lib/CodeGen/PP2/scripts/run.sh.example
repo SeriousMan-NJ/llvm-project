@@ -1,0 +1,21 @@
+#!/bin/bash
+
+mis_heuristic="max-approx-3"
+
+# MicroBenchmarks
+python benchmark.py --path /home/ywshin/test-suite/MicroBenchmarks/harris --benchmark harris --mis-heuristic $mis_heuristic
+python benchmark.py --path /home/ywshin/test-suite/MicroBenchmarks/ImageProcessing/BilateralFiltering --benchmark BilateralFiltering --mis-heuristic $mis_heuristic
+python benchmark.py --path /home/ywshin/test-suite/MicroBenchmarks/ImageProcessing/Blur --benchmark Blur --mis-heuristic $mis_heuristic
+python benchmark.py --path /home/ywshin/test-suite/MicroBenchmarks/ImageProcessing/Dilate --benchmark Dilate --mis-heuristic $mis_heuristic
+python benchmark.py --path /home/ywshin/test-suite/MicroBenchmarks/ImageProcessing/Dither --benchmark Dither --mis-heuristic $mis_heuristic
+python benchmark.py --path /home/ywshin/test-suite/MicroBenchmarks/ImageProcessing/Interpolation --benchmark Interpolation --mis-heuristic $mis_heuristic
+
+# Olden
+python benchmark.py --path /home/ywshin/test-suite/MultiSource/Benchmarks/Olden/bh --benchmark olden/bh --mis-heuristic $mis_heuristic
+python benchmark.py --path /home/ywshin/test-suite/MultiSource/Benchmarks/Olden/bisort --benchmark olden/bisort --mis-heuristic $mis_heuristic
+python benchmark.py --path /home/ywshin/test-suite/MultiSource/Benchmarks/Olden/health --benchmark olden/health --mis-heuristic $mis_heuristic
+python benchmark.py --path /home/ywshin/test-suite/MultiSource/Benchmarks/Olden/mst --benchmark olden/mst --mis-heuristic $mis_heuristic
+python benchmark.py --path /home/ywshin/test-suite/MultiSource/Benchmarks/Olden/tsp --benchmark olden/tsp --mis-heuristic $mis_heuristic
+
+# McGill
+python benchmark.py --path /home/ywshin/test-suite/SingleSource/Benchmarks/McGill --benchmark mcgill --mis-heuristic $mis_heuristic

@@ -51,12 +51,33 @@ def get_solution_nw(G, nw):
             sol.append(max_node)
     return sol
 
+def get_solution_nw2(G, nw):
+    val = 0
+    sol = []
+    G = copy.deepcopy(G)
+    while len(G.nodes) > 0:
+        max_value = -float("inf")
+        max_node = None
+        del_nodes = []
+        for n, d in G.degree:
+            if d == 0:
+                del_nodes.append(n)
+            elif 1/nw[n] > max_value:
+                max_value = 1/nw[n]
+                max_node = int(n)
+        if max_node is not None:
+            del_nodes.append(max_node)
+        G.remove_nodes_from(del_nodes)
+        if max_node is not None:
+            sol.append(max_node)
+    return sol
+
 @click.command()
 @click.option('--data-dir', help='Data directory')
 @click.option('--output-dir', help='Output directory')
 @click.option('--isec', type=int, help='Independent set extraction count')
-@click.option('--use-node-weights', type=bool, default=False, help='Use node weights')
-def run(data_dir, output_dir, isec, use_node_weights):
+@click.option('--cost-model', type=int, default=1, help='Cost model')
+def run(data_dir, output_dir, isec, cost_model):
     for filename in os.listdir(data_dir):
         if filename.endswith(".export.pp2graph.pkl"):
             filepath = os.path.join(data_dir, filename)
@@ -72,8 +93,10 @@ def run(data_dir, output_dir, isec, use_node_weights):
                     result_file = f'{output_dir}/{filename}.clr.{i}'
                     with open(result_file, 'w') as f_out:
                         print(filename)
-                        if use_node_weights:
+                        if cost_model == 2:
                             sol = get_solution_nw(G, nw)
+                        elif cost_model == 3:
+                            sol = get_solution_nw2(G, nw)
                         else:
                             sol = get_solution(G)
                         for n in sol:
