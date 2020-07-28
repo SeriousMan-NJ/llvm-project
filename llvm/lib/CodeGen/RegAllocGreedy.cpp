@@ -2380,7 +2380,7 @@ bool RAGreedy::tryRecoloringCandidates(PQueue &RecoloringQueue,
     // if (PRegToVRegs != nullptr)
     //   (*PRegToVRegs)[PhysReg].insert(LI->reg);
     // errs() << printReg(LI->reg) << " -> " << printReg(PhysReg, TRI) << "\n";
-    // FixedRegisters.insert(LI->reg);
+    FixedRegisters.insert(LI->reg);
   }
   return true;
 }
