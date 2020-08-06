@@ -690,6 +690,7 @@ void RAGreedy::evictInterference(LiveInterval &VirtReg, unsigned PhysReg,
     }
     ++NumEvicted;
     NewVRegs.push_back(Intf->reg);
+    exportRanges(VirtReg.reg, Intf->reg, 0, "evicted", false);
   }
 }
 
@@ -1376,6 +1377,9 @@ void RAGreedy::splitAroundRegion(LiveRangeEdit &LREdit,
     ++NumSplittedOrEvictedVRegsAllocatedByPP2;
   }
   ++NumGlobalSplits;
+  for (unsigned VReg : LREdit.regs()) {
+    exportRanges(Reg, VReg, 0, "global splitted", false);
+  }
   errs() << "[PP2] Global splitted: " << printReg(Reg, TRI) << "\n";
 
   SmallVector<unsigned, 8> IntvMap;
@@ -1646,6 +1650,9 @@ unsigned RAGreedy::tryBlockSplit(LiveInterval &VirtReg, AllocationOrder &Order,
   SmallVector<unsigned, 8> IntvMap;
   SE->finish(&IntvMap);
   ++NumBlockSplits;
+  for (unsigned Reg : LREdit.regs()) {
+    exportRanges(VirtReg.reg, Reg, 0, "block splitted", false);
+  }
   errs() << "[PP2] Block splitted: " << printReg(VirtReg.reg, TRI) << "\n";
 
   // Tell LiveDebugVariables about the new ranges.
@@ -1748,6 +1755,9 @@ RAGreedy::tryInstructionSplit(LiveInterval &VirtReg, AllocationOrder &Order,
   // Assign all new registers to RS_Spill. This was the last chance.
   setStage(LREdit.begin(), LREdit.end(), RS_Spill);
   ++NumInstructionSplits;
+  for (unsigned Reg : LREdit.regs()) {
+    exportRanges(VirtReg.reg, Reg, 0, "instruction splitted", false);
+  }
   errs() << "[PP2] Instruction splitted: " << printReg(VirtReg.reg, TRI) << "\n";
   return 0;
 }
@@ -2063,6 +2073,10 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
     ++NumSplittedOrEvictedVRegsAllocatedByPP2;
   }
   ++NumLocalSplits;
+
+  for (unsigned Reg : LREdit.regs()) {
+    exportRanges(VirtReg.reg, Reg, 0, "local splitted", false);
+  }
   errs() << "[PP2] Local splitted: " << printReg(VirtReg.reg, TRI) << "\n";
 
   return 0;
@@ -2418,6 +2432,8 @@ unsigned RAGreedy::selectOrSplit(LiveInterval &VirtReg,
                     "depth for recoloring reached. Use "
                     "-fexhaustive-register-search to skip cutoffs");
   }
+  if (Reg && Reg != ~0U)
+    exportRanges(VirtReg.reg, VirtReg.reg, Reg, "assigned");
   return Reg;
 }
 
@@ -2679,7 +2695,7 @@ void RAGreedy::printToBeSplittedVRegs() {
   assert(Queue.size() + 1 == numOfVRegs);
 }
 
-void RAGreedy::exportRanges(unsigned DVReg, unsigned TVReg, std::string action) {
+void RAGreedy::exportRanges(unsigned DVReg, unsigned TVReg, unsigned PReg, std::string action, bool incr_step) {
   const Function &F = MF->getFunction();
   std::error_code EC;
   std::stringstream name;
@@ -2696,7 +2712,7 @@ void RAGreedy::exportRanges(unsigned DVReg, unsigned TVReg, std::string action) 
     if (MRI->reg_nodbg_empty(Reg))
       continue;
 
-    OS_Step << printReg(Reg, TRI) << "," << printReg(VRM->getPhys(Reg), TRI);
+    OS_Step << printReg(Reg, TRI) << "," << printReg(Reg == TVReg && PReg ? PReg : (unsigned)VRM->getPhys(Reg), TRI);
     for (auto It = LIS->getInterval(Reg).begin(); It != LIS->getInterval(Reg).end(); ++It) {
       OS_Step << "," << Indexes->getZeroIndex().getInstrDistance(It->start) << "," << Indexes->getZeroIndex().getInstrDistance(It->end);
     }
@@ -2707,7 +2723,8 @@ void RAGreedy::exportRanges(unsigned DVReg, unsigned TVReg, std::string action) 
 
   OS_Step.flush();
   OS_Status.flush();
-  ++step;
+  if (incr_step)
+    ++step;
 }
 
 unsigned RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
@@ -2775,7 +2792,7 @@ unsigned RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
   // PP2: split이 필요한 레지스터만 남았으니, 어떤 레지스터들이 기다리고 있는지 출력해본다.
   if (!printed) {
     printToBeSplittedVRegs();
-    exportRanges(0, 0, "test");
+    exportRanges(0, 0, 0, "start");
     printed = true;
   }
 
@@ -2817,6 +2834,10 @@ unsigned RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     // the new regs are kept in LDV (still mapping to the old register), until
     // we rewrite spilled locations in LDV at a later stage.
     DebugVars->splitRegister(VirtReg.reg, LRE.regs(), *LIS);
+
+    for (unsigned Reg : LRE.regs()) {
+      exportRanges(VirtReg.reg, Reg, 0, "spilled", false);
+    }
 
     if (VerifyEnabled)
       MF->verify(this, "After spilling");

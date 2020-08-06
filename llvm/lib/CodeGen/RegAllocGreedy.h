@@ -484,7 +484,7 @@ private:
   }
 
   void printToBeSplittedVRegs();
-  void exportRanges(unsigned DVReg, unsigned TVReg, std::string action);
+  void exportRanges(unsigned DVReg, unsigned TVReg, unsigned PReg, std::string action, bool incr_step=true);
 };
 
 #endif
