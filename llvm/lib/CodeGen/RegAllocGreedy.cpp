@@ -84,6 +84,8 @@ using namespace llvm;
 
 STATISTIC(NumGlobalSplits, "Number of split global live ranges");
 STATISTIC(NumLocalSplits,  "Number of split local live ranges");
+STATISTIC(NumInstructionSplits,  "Number of split instruction live ranges");
+STATISTIC(NumBlockSplits,  "Number of split block live ranges");
 STATISTIC(NumEvicted,      "Number of interferences evicted");
 STATISTIC(NumSplittedOrEvictedVRegsAllocatedByPP2, "Number of splitted or evicted virtual registers allocated by PP2");
 
@@ -1374,6 +1376,7 @@ void RAGreedy::splitAroundRegion(LiveRangeEdit &LREdit,
     ++NumSplittedOrEvictedVRegsAllocatedByPP2;
   }
   ++NumGlobalSplits;
+  errs() << "[PP2] Global splitted: " << printReg(Reg, TRI) << "\n";
 
   SmallVector<unsigned, 8> IntvMap;
   SE->finish(&IntvMap);
@@ -1642,6 +1645,8 @@ unsigned RAGreedy::tryBlockSplit(LiveInterval &VirtReg, AllocationOrder &Order,
   // We did split for some blocks.
   SmallVector<unsigned, 8> IntvMap;
   SE->finish(&IntvMap);
+  ++NumBlockSplits;
+  errs() << "[PP2] Block splitted: " << printReg(VirtReg.reg, TRI) << "\n";
 
   // Tell LiveDebugVariables about the new ranges.
   DebugVars->splitRegister(Reg, LREdit.regs(), *LIS);
@@ -1742,6 +1747,8 @@ RAGreedy::tryInstructionSplit(LiveInterval &VirtReg, AllocationOrder &Order,
 
   // Assign all new registers to RS_Spill. This was the last chance.
   setStage(LREdit.begin(), LREdit.end(), RS_Spill);
+  ++NumInstructionSplits;
+  errs() << "[PP2] Instruction splitted: " << printReg(VirtReg.reg, TRI) << "\n";
   return 0;
 }
 
@@ -2056,6 +2063,7 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
     ++NumSplittedOrEvictedVRegsAllocatedByPP2;
   }
   ++NumLocalSplits;
+  errs() << "[PP2] Local splitted: " << printReg(VirtReg.reg, TRI) << "\n";
 
   return 0;
 }
@@ -2653,6 +2661,55 @@ void RAGreedy::tryHintsRecoloring() {
   }
 }
 
+void RAGreedy::printToBeSplittedVRegs() {
+  unsigned numOfVRegs = 0;
+
+  for (unsigned i = 0, e = MRI->getNumVirtRegs(); i != e; ++i) {
+    unsigned Reg = Register::index2VirtReg(i);
+    if (MRI->reg_nodbg_empty(Reg))
+      continue;
+
+    if (!VRM->hasPhys(Reg)) {
+      numOfVRegs++;
+      errs() << "[PP2] To be splitted: " << printReg(Reg, TRI) << "\n";
+    }
+  }
+  // errs() << Queue.size() << "\n";
+  // errs() << numOfVRegs << "\n";
+  assert(Queue.size() + 1 == numOfVRegs);
+}
+
+void RAGreedy::exportRanges(unsigned DVReg, unsigned TVReg, std::string action) {
+  const Function &F = MF->getFunction();
+  std::error_code EC;
+  std::stringstream name;
+  std::string FullyQualifiedName =
+    F.getParent()->getModuleIdentifier() + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
+  name << "step." << step << "." << FullyQualifiedName << ".txt";
+  raw_fd_ostream OS_Step(name.str(), EC, sys::fs::OF_Text);
+  name = std::stringstream();
+  name << "change." << FullyQualifiedName << ".txt";
+  raw_fd_ostream OS_Status(name.str(), EC, step > 0 ? sys::fs::OF_Append : sys::fs::OF_Text);
+
+  for (unsigned i = 0, e = MRI->getNumVirtRegs(); i != e; ++i) {
+    unsigned Reg = Register::index2VirtReg(i);
+    if (MRI->reg_nodbg_empty(Reg))
+      continue;
+
+    OS_Step << printReg(Reg, TRI) << "," << printReg(VRM->getPhys(Reg), TRI);
+    for (auto It = LIS->getInterval(Reg).begin(); It != LIS->getInterval(Reg).end(); ++It) {
+      OS_Step << "," << Indexes->getZeroIndex().getInstrDistance(It->start) << "," << Indexes->getZeroIndex().getInstrDistance(It->end);
+    }
+    OS_Step << "\n";
+  }
+
+  OS_Status << step << "," << printReg(DVReg, TRI) << "," << printReg(TVReg, TRI) << "," << action << "\n";
+
+  OS_Step.flush();
+  OS_Status.flush();
+  ++step;
+}
+
 unsigned RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
                                      SmallVectorImpl<unsigned> &NewVRegs,
                                      SmallVirtRegSet &FixedRegisters,
@@ -2714,6 +2771,14 @@ unsigned RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     NewVRegs.push_back(VirtReg.reg);
     return 0;
   }
+
+  // PP2: split이 필요한 레지스터만 남았으니, 어떤 레지스터들이 기다리고 있는지 출력해본다.
+  if (!printed) {
+    printToBeSplittedVRegs();
+    exportRanges(0, 0, "test");
+    printed = true;
+  }
+
 
   if (Stage < RS_Spill) {
     // Try splitting VirtReg or interferences.
@@ -2964,6 +3029,7 @@ bool RAGreedy::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &vrm, 
 
   VRegsAllocated.clear();
   PRegToVRegs = nullptr;
+  printed = false;
 
   return true;
 }

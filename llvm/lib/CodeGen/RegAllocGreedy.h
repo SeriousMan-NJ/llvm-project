@@ -66,6 +66,7 @@
 #include <queue>
 #include <tuple>
 #include <utility>
+#include <sstream>
 #include <set>
 
 using namespace llvm;
@@ -335,6 +336,8 @@ class RAGreedy : public MachineFunctionPass,
   SmallSetVector<LiveInterval *, 8> SetOfBrokenHints;
 
   RegSet VRegsAllocated;
+  bool printed = false;
+  unsigned step = 0;
 
 public:
   RAGreedy();
@@ -479,6 +482,9 @@ private:
                                    FoldedSpills);
     }
   }
+
+  void printToBeSplittedVRegs();
+  void exportRanges(unsigned DVReg, unsigned TVReg, std::string action);
 };
 
 #endif

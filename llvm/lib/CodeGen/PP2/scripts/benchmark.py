@@ -123,8 +123,8 @@ class BenchmarkBase():
         learning_rate=0.0001
         w_scale=0.01
         n_step=5
-        min_n=15
-        max_n=20
+        min_n=10
+        max_n=70
         num_env=10
         mem_size=500000
         max_iter=100000
