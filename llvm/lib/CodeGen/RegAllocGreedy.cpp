@@ -2723,7 +2723,7 @@ void RAGreedy::exportRanges(unsigned DVReg, unsigned TVReg, unsigned PReg, std::
 
   OS_Step.flush();
   OS_Status.flush();
-  if (incr_step)
+  //if (incr_step)
     ++step;
 }
 
