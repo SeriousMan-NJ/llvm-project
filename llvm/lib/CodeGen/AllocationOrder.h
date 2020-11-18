@@ -109,6 +109,7 @@ public:
 
   /// Get the allocation order without reordered hints.
   ArrayRef<MCPhysReg> getOrder() const { return Order; }
+  unsigned getIterationLimit() { return IterationLimit; }
 
   /// Return true if Reg is a preferred physical register.
   bool isHint(Register Reg) const {
