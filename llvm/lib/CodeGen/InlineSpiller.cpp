@@ -66,12 +66,12 @@ using namespace llvm;
 
 STATISTIC(NumSpilledRanges,   "Number of spilled live ranges");
 STATISTIC(NumSnippets,        "Number of spilled snippets");
-STATISTIC(NumSpills,          "Number of spills inserted");
+STATISTIC_GLOBAL(NumSpills,          "Number of spills inserted");
 STATISTIC(NumSpillsRemoved,   "Number of spills removed");
-STATISTIC(NumReloads,         "Number of reloads inserted");
+STATISTIC_GLOBAL(NumReloads,         "Number of reloads inserted");
 STATISTIC(NumReloadsRemoved,  "Number of reloads removed");
-STATISTIC(NumFolded,          "Number of folded stack accesses");
-STATISTIC(NumFoldedLoads,     "Number of folded loads");
+STATISTIC_GLOBAL(NumFolded,          "Number of folded stack accesses");
+STATISTIC_GLOBAL(NumFoldedLoads,     "Number of folded loads");
 STATISTIC(NumRemats,          "Number of rematerialized defs for spilling");
 
 static cl::opt<bool> DisableHoisting("disable-spill-hoist", cl::Hidden,

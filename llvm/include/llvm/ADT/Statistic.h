@@ -167,6 +167,9 @@ using Statistic = NoopStatistic;
 #define STATISTIC(VARNAME, DESC)                                               \
   static llvm::Statistic VARNAME = {DEBUG_TYPE, #VARNAME, DESC}
 
+#define STATISTIC_GLOBAL(VARNAME, DESC)                                               \
+  llvm::Statistic VARNAME = {DEBUG_TYPE, #VARNAME, DESC}
+
 // ALWAYS_ENABLED_STATISTIC - A macro to define a statistic like STATISTIC but
 // it is enabled even if LLVM_ENABLE_STATS is off.
 #define ALWAYS_ENABLED_STATISTIC(VARNAME, DESC)                                \

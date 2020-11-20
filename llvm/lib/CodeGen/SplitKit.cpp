@@ -48,8 +48,8 @@ using namespace llvm;
 
 STATISTIC(NumFinished, "Number of splits finished");
 STATISTIC(NumSimple,   "Number of splits that were simple");
-STATISTIC(NumCopies,   "Number of copies inserted for splitting");
-STATISTIC(NumRemats,   "Number of rematerialized defs for splitting");
+STATISTIC_GLOBAL(NumCopies,   "Number of copies inserted for splitting");
+STATISTIC_GLOBAL(NumRemats,   "Number of rematerialized defs for splitting");
 STATISTIC(NumRepairs,  "Number of invalid live ranges repaired");
 
 //===----------------------------------------------------------------------===//

@@ -69,6 +69,7 @@
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Demangle/Demangle.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -78,6 +79,8 @@
 #include <utility>
 #include <stdlib.h>
 #include <time.h>
+#include <mutex>
+#include <string>
 
 using namespace llvm;
 
@@ -87,6 +90,26 @@ STATISTIC(NumGlobalSplits, "Number of split global live ranges");
 STATISTIC(NumLocalSplits,  "Number of split local live ranges");
 STATISTIC(NumEvicted,      "Number of interferences evicted");
 STATISTIC(TotalSpillCosts, "Total spill costs");
+STATISTIC(TotalSplitCosts, "Total split costs");
+
+extern llvm::Statistic NumSpills;
+static unsigned _NumSpills;
+extern llvm::Statistic NumFolded;
+static unsigned _NumFolded;
+extern llvm::Statistic NumReloads;
+static unsigned _NumReloads;
+extern llvm::Statistic NumFoldedLoads;
+static unsigned _NumFoldedLoads;
+extern llvm::Statistic NumCopies;
+static unsigned _NumCopies;
+extern llvm::Statistic NumRemats;
+static unsigned _NumRemats;
+float SpillCosts;
+static float _SpillCosts;
+float SplitCosts;
+static float _SplitCosts;
+
+std::mutex m;
 
 static cl::opt<SplitEditor::ComplementSpillMode> SplitSpillMode(
     "split-spill-mode", cl::Hidden,
@@ -556,6 +579,38 @@ private:
       reportNumberOfSplillsReloads(L, Reloads, FoldedReloads, Spills,
                                    FoldedSpills);
     }
+  }
+
+  /// stats
+  void PrintStatisticsJSON(std::string filename);
+
+  // 테스트: [START]와 [END] 사이에 [PARENT]가 존재하거나, [maybe PARENT]가 두 개 존재해야 한다.
+  float calcSplitCosts(LiveRangeEdit& LREdit) {
+    float SplitCost = 0.0f;
+    LiveInterval &PLI = LREdit.getParent();
+    // errs() << "[START]\n";
+    for (unsigned I = 0, E = LREdit.size(); I != E; ++I) {
+      LiveInterval &LI = LIS->getInterval(LREdit.get(I));
+      if (!LI.empty() && LI.beginIndex() != PLI.beginIndex()) {
+        MachineBasicBlock *localMBB = LIS->getMBBFromIndex(LI.beginIndex());
+        SplitCost += LiveIntervals::getSpillWeight(true, false, MBFI, localMBB) / 3.0f; // spill이 3배 더 비싸다고 가정한다.
+        // errs() << "[Type 1]\n";
+      }
+      if (!LI.empty() && LI.endIndex() != PLI.endIndex()) {
+        MachineBasicBlock *localMBB = LIS->getMBBFromIndex(LI.endIndex());
+        SplitCost += LiveIntervals::getSpillWeight(false, true, MBFI, localMBB) / 3.0f; // spill이 3배 더 비싸다고 가정한다.
+        // errs() << "[Type 2]\n";
+      }
+      // if (!LI.empty() && LI.beginIndex() == PLI.beginIndex() && LI.endIndex() == PLI.endIndex()) {
+      //   errs() << "[PARENT]\n";
+      // } else if (!LI.empty() &&
+      //            (LI.beginIndex() != PLI.beginIndex() && LI.endIndex() == PLI.endIndex() ||
+      //            LI.beginIndex() == PLI.beginIndex() && LI.endIndex() != PLI.endIndex())) {
+      //   errs() << "[maybe PARENT]\n";
+      // }
+    }
+    // errs() << "[END]\n";
+    return SplitCost;
   }
 };
 
@@ -1774,6 +1829,7 @@ void RAGreedy::splitAroundRegion(LiveRangeEdit &LREdit,
 
   SmallVector<unsigned, 8> IntvMap;
   SE->finish(&IntvMap);
+  SplitCosts += calcSplitCosts(LREdit);
   DebugVars->splitRegister(Reg, LREdit.regs(), *LIS);
 
   ExtraRegInfo.resize(MRI->getNumVirtRegs());
@@ -2028,6 +2084,7 @@ unsigned RAGreedy::tryBlockSplit(LiveInterval &VirtReg, AllocationOrder &Order,
   // We did split for some blocks.
   SmallVector<unsigned, 8> IntvMap;
   SE->finish(&IntvMap);
+  SplitCosts += calcSplitCosts(LREdit);
 
   // Tell LiveDebugVariables about the new ranges.
   DebugVars->splitRegister(Reg, LREdit.regs(), *LIS);
@@ -2123,6 +2180,7 @@ RAGreedy::tryInstructionSplit(LiveInterval &VirtReg, AllocationOrder &Order,
 
   SmallVector<unsigned, 8> IntvMap;
   SE->finish(&IntvMap);
+  SplitCosts += calcSplitCosts(LREdit);
   DebugVars->splitRegister(VirtReg.reg(), LREdit.regs(), *LIS);
   ExtraRegInfo.resize(MRI->getNumVirtRegs());
 
@@ -2419,6 +2477,7 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
   SE->useIntv(SegStart, SegStop);
   SmallVector<unsigned, 8> IntvMap;
   SE->finish(&IntvMap);
+  SplitCosts += calcSplitCosts(LREdit);
   DebugVars->splitRegister(VirtReg.reg(), LREdit.regs(), *LIS);
 
   // If the new range has the same number of instructions as before, mark it as
@@ -3120,7 +3179,7 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
                        TimerGroupDescription, TimePassesIsEnabled);
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
     spiller().spill(LRE);
-    TotalSpillCosts += VirtReg.weight();
+    SpillCosts += VirtReg.weight() * (VirtReg.getSize() + 25*SlotIndex::InstrDist); // denormalization;
     setStage(NewVRegs.begin(), NewVRegs.end(), RS_Done);
 
     // Tell LiveDebugVariables about the new ranges. Ranges not being covered by
@@ -3208,7 +3267,47 @@ void RAGreedy::reportNumberOfSplillsReloads(MachineLoop *L, unsigned &Reloads,
   }
 }
 
+void RAGreedy::PrintStatisticsJSON(std::string function_name) {
+  if (function_name.find(":", 0) != std::string::npos ||
+      function_name.rfind("_GLOBAL", 0) == 0 ||
+      function_name.find("__clang_call_terminate", 0) != std::string::npos) {
+    // 통계 출력에 해당되지 않는 함수이다.
+    return;
+  }
+  std::error_code EC;
+  raw_fd_ostream OS(function_name + ".json", EC, sys::fs::OF_Text);
+
+  // Print all of the statistics.
+  OS << "{\n";
+  OS << "\t\"" << "NumSpillCodes" << "\": " << NumSpills + NumFolded + NumReloads + NumFoldedLoads << ",\n";
+  OS << "\t\"" << "SpillCosts" << "\": " << SpillCosts << ",\n";
+  OS << "\t\"" << "NumSplitCodes" << "\": " << NumCopies + NumRemats << ",\n";
+  OS << "\t\"" << "SplitCosts" << "\": " << SplitCosts;
+  OS << "\n}\n";
+  OS.flush();
+}
+
 bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
+  m.lock(); // 통계를 위해서 한 번에 한 함수만 레지스터 할당을 수행해야 한다.
+  errs() << llvm::demangle(mf.getName().data()) << "\n";
+  _NumSpills = NumSpills.getValue();
+  NumSpills = 0;
+  _NumFolded = NumFolded.getValue();
+  NumFolded = 0;
+  _NumReloads = NumReloads.getValue();
+  NumReloads = 0;
+  _NumFoldedLoads = NumFoldedLoads.getValue();
+  NumFoldedLoads = 0;
+  _NumCopies = NumCopies.getValue();
+  NumCopies = 0;
+  _NumRemats = NumRemats.getValue();
+  NumRemats = 0;
+  _SpillCosts = SpillCosts;
+  SpillCosts = 0.0f;
+  _SplitCosts = SplitCosts;
+  SplitCosts = 0.0f;
+  srand(time(NULL));
+
   LLVM_DEBUG(dbgs() << "********** GREEDY REGISTER ALLOCATION **********\n"
                     << "********** Function: " << mf.getName() << '\n');
 
@@ -3267,5 +3366,22 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   reportNumberOfSplillsReloads();
 
   releaseMemory();
+
+  std::string s = llvm::demangle(mf.getName().data());
+  std::string delimiter = "(";
+  std::string function_name = s.substr(0, s.find(delimiter));
+  PrintStatisticsJSON(function_name);
+
+  NumSpills += _NumSpills;
+  NumFolded += _NumFolded;
+  NumReloads += _NumReloads;
+  NumFoldedLoads += _NumFoldedLoads;
+  NumCopies += _NumCopies;
+  NumRemats += _NumRemats;
+  SpillCosts += _SpillCosts;
+  SplitCosts += _SplitCosts;
+  TotalSpillCosts = (unsigned)SpillCosts;
+  TotalSplitCosts = (unsigned)SplitCosts;
+  m.unlock();
   return true;
 }
