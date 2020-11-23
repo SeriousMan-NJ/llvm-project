@@ -81,6 +81,7 @@
 #include <time.h>
 #include <mutex>
 #include <string>
+#include <vector>
 
 using namespace llvm;
 
@@ -164,6 +165,24 @@ static cl::opt<bool> ConsiderLocalIntervalCost(
 
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
+
+// register allocation policy
+static cl::opt<unsigned> AssignmentPolicy(
+    "assignment-policy", cl::Hidden,
+    cl::desc("Register assignment policy. 0: default; 1: random (respect hint)"),
+    cl::init(0));
+
+// region split policy
+static cl::opt<unsigned> RegionSplitPolicy(
+    "region-split-policy", cl::Hidden,
+    cl::desc("Region split policy. 0: default; 1: weighted random"),
+    cl::init(0));
+
+// local split policy
+static cl::opt<unsigned> LocalSplitPolicy(
+    "local-split-policy", cl::Hidden,
+    cl::desc("Local split policy. 0: default; 1: weighted random"),
+    cl::init(0));
 
 namespace {
 
@@ -612,6 +631,9 @@ private:
     // errs() << "[END]\n";
     return SplitCost;
   }
+
+  unsigned weightedRandomI(std::vector<unsigned> Weights);
+  unsigned weightedRandomF(std::vector<float> Weights);
 };
 
 } // end anonymous namespace
@@ -822,15 +844,38 @@ Register RAGreedy::tryAssign(LiveInterval &VirtReg,
                              SmallVectorImpl<Register> &NewVRegs,
                              const SmallVirtRegSet &FixedRegisters) {
   Register PhysReg;
-  for (auto I = Order.begin(), E = Order.end(); I != E && !PhysReg; ++I) {
-    assert(*I);
-    if (!Matrix->checkInterference(VirtReg, *I)) {
-      if (I.isHint())
-        return *I;
-      else
-        PhysReg = *I;
+  if (AssignmentPolicy == 0) { // default policy
+    for (auto I = Order.begin(), E = Order.end(); I != E && !PhysReg; ++I) {
+      assert(*I);
+      if (!Matrix->checkInterference(VirtReg, *I)) {
+        if (I.isHint())
+          return *I;
+        else
+          PhysReg = *I;
+      }
     }
+  } else {
+    // respect hints
+    for (auto I = Order.begin(), E = Order.end(); I != E && !PhysReg; ++I) {
+      assert(*I);
+      if (!Matrix->checkInterference(VirtReg, *I))
+        if (I.isHint())
+          return *I;
+    }
+
+    std::vector<llvm::Register> Candidates;
+    for (auto I = Order.begin(), E = Order.end(); I != E && !PhysReg; ++I) {
+      if (!Matrix->checkInterference(VirtReg, *I)) {
+        Candidates.push_back(*I);
+      }
+    }
+    if (Candidates.size() == 0) {
+      return PhysReg;
+    }
+    unsigned index = rand() % Candidates.size();
+    PhysReg = Candidates[index];
   }
+
   if (!PhysReg.isValid())
     return PhysReg;
 
@@ -1918,12 +1963,55 @@ MCRegister RAGreedy::tryRegionSplit(LiveInterval &VirtReg,
   return doRegionSplit(VirtReg, BestCand, HasCompact, NewVRegs);
 }
 
+unsigned RAGreedy::weightedRandomI(std::vector<unsigned> Weights) {
+  unsigned Max = 0;
+  for (unsigned i = 0; i < Weights.size(); i++) {
+    if (Max < Weights[i]) {
+      Max = Weights[i];
+    }
+  }
+  Max += 1;
+  unsigned SumOfWeights = 0;
+  for (unsigned i = 0; i < Weights.size(); i++) {
+    SumOfWeights += Max - Weights[i];
+  }
+  int rnd = random() % SumOfWeights;
+  for (unsigned i = 0; i < Weights.size(); i++) {
+    if (rnd < Max - Weights[i])
+      return i;
+    rnd -= Max - Weights[i];
+  }
+  assert(!"should not reach here!");
+}
+
+unsigned RAGreedy::weightedRandomF(std::vector<float> Weights) {
+  float Max = 0;
+  for (unsigned i = 0; i < Weights.size(); i++) {
+    if (Max < Weights[i]) {
+      Max = Weights[i];
+    }
+  }
+  unsigned SumOfWeights = 0;
+  for (unsigned i = 0; i < Weights.size(); i++) {
+    SumOfWeights += Max / Weights[i];
+  }
+  int rnd = random() % SumOfWeights;
+  for (unsigned i = 0; i < Weights.size(); i++) {
+    if (rnd < Max / Weights[i])
+      return i;
+    rnd -= Max / Weights[i];
+  }
+  assert(!"should not reach here!");
+}
+
 unsigned RAGreedy::calculateRegionSplitCost(LiveInterval &VirtReg,
                                             AllocationOrder &Order,
                                             BlockFrequency &BestCost,
                                             unsigned &NumCands, bool IgnoreCSR,
                                             bool *CanCauseEvictionChain) {
   unsigned BestCand = NoCand;
+  std::vector<unsigned> Candidates;
+  std::vector<unsigned> Weights;
   for (MCPhysReg PhysReg : Order) {
     assert(PhysReg);
     if (IgnoreCSR && isUnusedCalleeSavedReg(PhysReg))
@@ -1996,7 +2084,9 @@ unsigned RAGreedy::calculateRegionSplitCost(LiveInterval &VirtReg,
     });
     if (Cost < BestCost) {
       BestCand = NumCands;
+      Candidates.push_back(BestCand);
       BestCost = Cost;
+      Weights.push_back(Cost.getFrequency());
       // See splitCanCauseEvictionChain for detailed description of bad
       // eviction chain scenarios.
       if (CanCauseEvictionChain)
@@ -2015,7 +2105,16 @@ unsigned RAGreedy::calculateRegionSplitCost(LiveInterval &VirtReg,
     LLVM_DEBUG(dbgs() << "cause bad eviction chain\n");
   }
 
-  return BestCand;
+  if (BestCand == NoCand) {
+    return BestCand;
+  }
+
+  if (RegionSplitPolicy == 0) {
+    return BestCand;
+  } else {
+    unsigned i = weightedRandomI(Weights);
+    return Candidates[i];
+  }
 }
 
 unsigned RAGreedy::doRegionSplit(LiveInterval &VirtReg, unsigned BestCand,
@@ -2365,6 +2464,9 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
     (1.0f / MBFI->getEntryFreq());
   SmallVector<float, 8> GapWeight;
 
+  std::vector<unsigned> BestBefores;
+  std::vector<unsigned> BestAfters;
+  std::vector<float> Weights;
   for (MCPhysReg PhysReg : Order) {
     assert(PhysReg);
     // Keep track of the largest spill weight that would need to be evicted in
@@ -2429,7 +2531,10 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
             LLVM_DEBUG(dbgs() << " (best)");
             BestDiff = Hysteresis * Diff;
             BestBefore = SplitBefore;
+            BestBefores.push_back(SplitBefore);
             BestAfter = SplitAfter;
+            BestAfters.push_back(SplitAfter);
+            Weights.push_back(EstWeight);
           }
         }
       }
@@ -2470,6 +2575,12 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
 
   LiveRangeEdit LREdit(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
   SE->reset(LREdit);
+
+  if (LocalSplitPolicy == 1 && Weights.size() > 0) {
+    unsigned i = weightedRandomF(Weights);
+    BestBefore = BestBefores[i];
+    BestAfter = BestAfters[i];
+  }
 
   SE->openIntv();
   SlotIndex SegStart = SE->enterIntvBefore(Uses[BestBefore]);
