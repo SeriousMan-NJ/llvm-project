@@ -35,6 +35,8 @@
 #include <cstring>
 using namespace llvm;
 
+std::string Filename;
+
 /// -stats - Command line option to cause transformations to emit stats about
 /// what they did.
 ///
@@ -239,10 +241,11 @@ void llvm::PrintStatistics() {
   std::unique_ptr<raw_ostream> OutStream = CreateInfoOutputFile();
   std::error_code EC;
   if (StatsAsJSONFile) {
-    raw_fd_ostream OutFileStream("stats.json", EC, sys::fs::OF_Text);
+    if (Filename.size() == 0)
+      Filename = "stats.json";
+    raw_fd_ostream OutFileStream(Filename, EC, sys::fs::OF_Text);
     PrintStatisticsJSON(OutFileStream);
-  }
-  if (StatsAsJSON)
+  } else if (StatsAsJSON)
     PrintStatisticsJSON(*OutStream);
   else
     PrintStatistics(*OutStream);

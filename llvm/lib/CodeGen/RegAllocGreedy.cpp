@@ -70,6 +70,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Demangle/Demangle.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -110,7 +111,9 @@ static float _SpillCosts;
 float SplitCosts;
 static float _SplitCosts;
 
-std::mutex m;
+static std::mutex m;
+
+extern std::string Filename;
 
 static cl::opt<SplitEditor::ComplementSpillMode> SplitSpillMode(
     "split-spill-mode", cl::Hidden,
@@ -183,6 +186,16 @@ static cl::opt<unsigned> LocalSplitPolicy(
     "local-split-policy", cl::Hidden,
     cl::desc("Local split policy. 0: default; 1: weighted random"),
     cl::init(0));
+
+// function statistics json file
+static cl::opt<bool> EnableFunctionStats(
+    "function-stats", cl::Hidden,
+    cl::desc("Create function statistics json file"),
+    cl::init(false));
+
+static cl::opt<bool> SetStatsFilename("set-stats-filename",
+    cl::desc("Set statistics filename as sourcefile name"),
+    cl::init(false), cl::Hidden);
 
 namespace {
 
@@ -3400,7 +3413,7 @@ void RAGreedy::PrintStatisticsJSON(std::string function_name) {
 
 bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   m.lock(); // 통계를 위해서 한 번에 한 함수만 레지스터 할당을 수행해야 한다.
-  errs() << llvm::demangle(mf.getName().data()) << "\n";
+  // errs() << llvm::demangle(mf.getName().data()) << "\n";
   _NumSpills = NumSpills.getValue();
   NumSpills = 0;
   _NumFolded = NumFolded.getValue();
@@ -3481,7 +3494,16 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   std::string s = llvm::demangle(mf.getName().data());
   std::string delimiter = "(";
   std::string function_name = s.substr(0, s.find(delimiter));
-  PrintStatisticsJSON(function_name);
+  Function &F = MF->getFunction();
+  Module *M = F.getParent();
+  if (EnableFunctionStats) {
+    PrintStatisticsJSON(M->getSourceFileName() + "." + function_name);
+  }
+  if (SetStatsFilename) {
+    Filename = M->getSourceFileName() + ".json";
+  } else {
+    Filename = "stats.json";
+  }
 
   NumSpills += _NumSpills;
   NumFolded += _NumFolded;
