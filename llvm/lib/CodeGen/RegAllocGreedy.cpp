@@ -83,6 +83,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <math.h>
 
 using namespace llvm;
 
@@ -1983,10 +1984,9 @@ unsigned RAGreedy::weightedRandomI(std::vector<unsigned> Weights) {
       Max = Weights[i];
     }
   }
-  Max += 1;
   unsigned SumOfWeights = 0;
   for (unsigned i = 0; i < Weights.size(); i++) {
-    SumOfWeights += Max - Weights[i];
+    SumOfWeights += ceil(Max / Weights[i]);
   }
   int rnd = random() % SumOfWeights;
   for (unsigned i = 0; i < Weights.size(); i++) {
@@ -2004,9 +2004,10 @@ unsigned RAGreedy::weightedRandomF(std::vector<float> Weights) {
       Max = Weights[i];
     }
   }
+  Max += 1;
   unsigned SumOfWeights = 0;
   for (unsigned i = 0; i < Weights.size(); i++) {
-    SumOfWeights += Max / Weights[i];
+    SumOfWeights += ceil(Max / Weights[i]);
   }
   int rnd = random() % SumOfWeights;
   for (unsigned i = 0; i < Weights.size(); i++) {
