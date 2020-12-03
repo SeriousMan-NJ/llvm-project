@@ -3501,7 +3501,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
     PrintStatisticsJSON(M->getSourceFileName() + "." + function_name);
   }
   if (SetStatsFilename) {
-    Filename = M->getSourceFileName() + ".json";
+    Filename = M->getSourceFileName() + "." + std::to_string(AssignmentPolicy) + std::to_string(RegionSplitPolicy) + std::to_string(LocalSplitPolicy) + ".json";
   } else {
     Filename = "stats.json";
   }
