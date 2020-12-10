@@ -84,6 +84,8 @@
 #include <string>
 #include <vector>
 #include <math.h>
+#include <sstream>
+#include <fstream>
 
 using namespace llvm;
 
@@ -196,6 +198,10 @@ static cl::opt<bool> EnableFunctionStats(
 
 static cl::opt<bool> SetStatsFilename("set-stats-filename",
     cl::desc("Set statistics filename as sourcefile name"),
+    cl::init(false), cl::Hidden);
+
+static cl::opt<bool> loadPolicy("load-policy",
+    cl::desc("Load policy from log file"),
     cl::init(false), cl::Hidden);
 
 namespace {
@@ -615,7 +621,7 @@ private:
   }
 
   /// stats
-  void PrintStatisticsJSON(std::string filename);
+  void PrintStatisticsJSON(std::string filename, std::string function_name);
 
   // 테스트: [START]와 [END] 사이에 [PARENT]가 존재하거나, [maybe PARENT]가 두 개 존재해야 한다.
   float calcSplitCosts(LiveRangeEdit& LREdit) {
@@ -626,12 +632,12 @@ private:
       LiveInterval &LI = LIS->getInterval(LREdit.get(I));
       if (!LI.empty() && LI.beginIndex() != PLI.beginIndex()) {
         MachineBasicBlock *localMBB = LIS->getMBBFromIndex(LI.beginIndex());
-        SplitCost += LiveIntervals::getSpillWeight(true, false, MBFI, localMBB) / 3.0f; // spill이 3배 더 비싸다고 가정한다.
+        SplitCost += LiveIntervals::getSpillWeight(true, false, MBFI, localMBB);// / 3.0f; // spill이 3배 더 비싸다고 가정한다.
         // errs() << "[Type 1]\n";
       }
       if (!LI.empty() && LI.endIndex() != PLI.endIndex()) {
         MachineBasicBlock *localMBB = LIS->getMBBFromIndex(LI.endIndex());
-        SplitCost += LiveIntervals::getSpillWeight(false, true, MBFI, localMBB) / 3.0f; // spill이 3배 더 비싸다고 가정한다.
+        SplitCost += LiveIntervals::getSpillWeight(false, true, MBFI, localMBB);// / 3.0f; // spill이 3배 더 비싸다고 가정한다.
         // errs() << "[Type 2]\n";
       }
       // if (!LI.empty() && LI.beginIndex() == PLI.beginIndex() && LI.endIndex() == PLI.endIndex()) {
@@ -648,6 +654,14 @@ private:
 
   unsigned weightedRandomI(std::vector<unsigned> Weights);
   unsigned weightedRandomF(std::vector<float> Weights);
+
+  std::vector<unsigned> AssignmentLog;
+  std::vector<unsigned> AssignmentLogLoaded;
+  std::vector<unsigned> LocalSplitLog;
+  std::vector<unsigned> LocalSplitLogLoaded;
+  std::vector<unsigned> RegionSplitLog;
+  std::vector<unsigned> RegionSplitLogLoaded;
+  float MinTotalCosts;
 };
 
 } // end anonymous namespace
@@ -886,7 +900,17 @@ Register RAGreedy::tryAssign(LiveInterval &VirtReg,
     if (Candidates.size() == 0) {
       return PhysReg;
     }
-    unsigned index = rand() % Candidates.size();
+
+    unsigned index;
+    if (loadPolicy && AssignmentLogLoaded.size() > 0) {
+      // errs() << "[GOOD]\n";
+      index = *AssignmentLogLoaded.begin();
+      AssignmentLogLoaded.erase(AssignmentLogLoaded.begin());
+    } else {
+      // errs() << "[BAD]\n";
+      index = rand() % Candidates.size();
+    }
+    AssignmentLog.push_back(index);
     PhysReg = Candidates[index];
   }
 
@@ -1978,44 +2002,44 @@ MCRegister RAGreedy::tryRegionSplit(LiveInterval &VirtReg,
 }
 
 unsigned RAGreedy::weightedRandomI(std::vector<unsigned> Weights) {
-  unsigned Max = 0;
+  float Max = 0;
   for (unsigned i = 0; i < Weights.size(); i++) {
-    if (Max < Weights[i]) {
-      Max = Weights[i];
+    unsigned Weight = Weights[i] > 0 ? Weights[i] : 1;
+    if (Max < Weight) {
+      Max = Weight;
     }
   }
   unsigned SumOfWeights = 0;
   for (unsigned i = 0; i < Weights.size(); i++) {
-    SumOfWeights += ceil(Max / Weights[i]);
+    unsigned Weight = Weights[i] > 0 ? Weights[i] : 1;
+    SumOfWeights += ceil(Max / 4 / Weight);
   }
   int rnd = random() % SumOfWeights;
   for (unsigned i = 0; i < Weights.size(); i++) {
-    if (rnd < Max - Weights[i])
+    unsigned Weight = Weights[i] > 0 ? Weights[i] : 1;
+    if (rnd < ceil(Max / 4 / Weight))
       return i;
-    rnd -= Max - Weights[i];
+    rnd -= ceil(Max / 4 / Weight);
   }
   assert(!"should not reach here!");
 }
 
 unsigned RAGreedy::weightedRandomF(std::vector<float> Weights) {
-  float Max = 0;
+  float Sum = 0;
   for (unsigned i = 0; i < Weights.size(); i++) {
-    if (Max < Weights[i]) {
-      Max = Weights[i];
-    }
+    Sum += Weights[i];
   }
-  Max += 1;
-  unsigned SumOfWeights = 0;
+
+  if (Sum == 0) {
+    return random() % Weights.size();
+  }
+
+  std::vector<unsigned> WeightsU;
   for (unsigned i = 0; i < Weights.size(); i++) {
-    SumOfWeights += ceil(Max / Weights[i]);
+    WeightsU.push_back(ceil(100 * Weights[i] / Sum) + 1);
   }
-  int rnd = random() % SumOfWeights;
-  for (unsigned i = 0; i < Weights.size(); i++) {
-    if (rnd < Max / Weights[i])
-      return i;
-    rnd -= Max / Weights[i];
-  }
-  assert(!"should not reach here!");
+
+  return weightedRandomI(WeightsU);
 }
 
 unsigned RAGreedy::calculateRegionSplitCost(LiveInterval &VirtReg,
@@ -2126,7 +2150,14 @@ unsigned RAGreedy::calculateRegionSplitCost(LiveInterval &VirtReg,
   if (RegionSplitPolicy == 0) {
     return BestCand;
   } else {
-    unsigned i = weightedRandomI(Weights);
+    unsigned i;
+    if (loadPolicy && RegionSplitLogLoaded.size() > 0) {
+      i = *RegionSplitLogLoaded.begin();
+      RegionSplitLogLoaded.erase(RegionSplitLogLoaded.begin());
+    } else {
+      i = weightedRandomI(Weights);
+    }
+    RegionSplitLog.push_back(i);
     return Candidates[i];
   }
 }
@@ -2590,8 +2621,15 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
   LiveRangeEdit LREdit(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
   SE->reset(LREdit);
 
-  if (LocalSplitPolicy == 1 && Weights.size() > 0) {
-    unsigned i = weightedRandomF(Weights);
+  if (LocalSplitPolicy == 1) {
+    unsigned i;
+    if (loadPolicy && LocalSplitLogLoaded.size()) {
+      i = *LocalSplitLogLoaded.begin();
+      LocalSplitLogLoaded.erase(LocalSplitLogLoaded.begin());
+    } else {
+      i = weightedRandomF(Weights);
+    }
+    LocalSplitLog.push_back(i);
     BestBefore = BestBefores[i];
     BestAfter = BestAfters[i];
   }
@@ -3392,24 +3430,58 @@ void RAGreedy::reportNumberOfSplillsReloads(MachineLoop *L, unsigned &Reloads,
   }
 }
 
-void RAGreedy::PrintStatisticsJSON(std::string function_name) {
-  if (function_name.find(":", 0) != std::string::npos ||
-      function_name.rfind("_GLOBAL", 0) == 0 ||
-      function_name.find("__clang_call_terminate", 0) != std::string::npos) {
-    // 통계 출력에 해당되지 않는 함수이다.
-    return;
-  }
-  std::error_code EC;
-  raw_fd_ostream OS(function_name + ".json", EC, sys::fs::OF_Text);
+void RAGreedy::PrintStatisticsJSON(std::string filename, std::string function_name) {
+  // if (function_name.find(":", 0) != std::string::npos ||
+  //     function_name.find("_GLOBAL", 0) != std::string::npos ||
+  //     function_name.find("__clang_call_terminate", 0) != std::string::npos) {
+  //   // 통계 출력에 해당되지 않는 함수이다.
+  //   return;
+  // }
 
-  // Print all of the statistics.
-  OS << "{\n";
-  OS << "\t\"" << "NumSpillCodes" << "\": " << NumSpills + NumFolded + NumReloads + NumFoldedLoads << ",\n";
-  OS << "\t\"" << "SpillCosts" << "\": " << SpillCosts << ",\n";
-  OS << "\t\"" << "NumSplitCodes" << "\": " << NumCopies + NumRemats << ",\n";
-  OS << "\t\"" << "SplitCosts" << "\": " << SplitCosts;
-  OS << "\n}\n";
-  OS.flush();
+  // 유의미한 통계가 잡혔을 때 혹은 처음
+  if (MinTotalCosts < 0 || MinTotalCosts > SpillCosts + SplitCosts) {
+    std::error_code EC;
+    raw_fd_ostream OS(filename + ".log", EC, sys::fs::OF_Text);
+    raw_fd_ostream OSJ(filename + ".json", EC, sys::fs::OF_Text);
+    std::stringstream ss;
+
+    const char* delim = " ";
+    if (AssignmentPolicy != 0) {
+      ss << "ap";
+      for (auto i : AssignmentLog) {
+        ss << delim << i;
+      }
+      ss << std::endl;
+    }
+    if (RegionSplitPolicy != 0) {
+      ss << "rsp";
+      for (auto i : RegionSplitLog) {
+        ss << delim << i;
+      }
+      ss << std::endl;
+    }
+    if (LocalSplitPolicy != 0) {
+      ss << "lsp";
+      for (auto i : LocalSplitLog) {
+        ss << delim << i;
+      }
+      ss << std::endl;
+    }
+    ss << "MinTotalCosts" << delim << SpillCosts + SplitCosts << std::endl;
+    ss << "name" << delim << function_name << std::endl;
+
+    OS << ss.str();
+    OS.flush();
+
+    // Print all of the statistics.
+    OSJ << "{\n";
+    OSJ << "\t\"" << "NumSpillCodes" << "\": " << NumSpills + NumFolded + NumReloads + NumFoldedLoads << ",\n";
+    OSJ << "\t\"" << "SpillCosts" << "\": " << SpillCosts << ",\n";
+    OSJ << "\t\"" << "NumSplitCodes" << "\": " << NumCopies + NumRemats << ",\n";
+    OSJ << "\t\"" << "SplitCosts" << "\": " << SplitCosts;
+    OSJ << "\n}\n";
+    OSJ.flush();
+  }
 }
 
 bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
@@ -3432,6 +3504,53 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   _SplitCosts = SplitCosts;
   SplitCosts = 0.0f;
   srand(time(NULL));
+
+  AssignmentLog.clear();
+  AssignmentLogLoaded.clear();
+  LocalSplitLog.clear();
+  LocalSplitLogLoaded.clear();
+  RegionSplitLog.clear();
+  RegionSplitLogLoaded.clear();
+  MinTotalCosts = -1;
+
+  Function &F = mf.getFunction();
+  Module *M = F.getParent();
+  std::string filename = M->getSourceFileName() + ".fn." + std::to_string(AssignmentPolicy) + std::to_string(RegionSplitPolicy) + std::to_string(LocalSplitPolicy) + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
+  // errs() << filename << "\n";
+  char buff[100000];
+  std::string key;
+  std::string value;
+  std::ifstream infile(filename + ".log");
+  if (loadPolicy && !infile.is_open()) {
+    errs() << filename << " " << "not exists!\n";
+    assert(false);
+  }
+  if (infile.is_open()) {
+    while (infile.getline(buff, 100000)) {
+      std::istringstream ss(buff);
+      std::getline(ss, key, ' ');
+      if (key.compare("ap") == 0) {
+        while (std::getline(ss, value, ' ')) {
+          AssignmentLogLoaded.push_back(std::stoi(value));
+        }
+      } else if (key.compare("rsp") == 0) {
+        while (std::getline(ss, value, ' ')) {
+          RegionSplitLogLoaded.push_back(std::stoi(value));
+        }
+      } else if (key.compare("lsp") == 0) {
+        while (std::getline(ss, value, ' ')) {
+          LocalSplitLogLoaded.push_back(std::stoi(value));
+        }
+      } else if (key.compare("MinTotalCosts") == 0) {
+        while (std::getline(ss, value, ' ')) {
+          MinTotalCosts = std::stof(value);
+        }
+      } else {
+        continue;
+      }
+    }
+    infile.close();
+  }
 
   LLVM_DEBUG(dbgs() << "********** GREEDY REGISTER ALLOCATION **********\n"
                     << "********** Function: " << mf.getName() << '\n');
@@ -3492,13 +3611,8 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
 
   releaseMemory();
 
-  std::string s = llvm::demangle(mf.getName().data());
-  std::string delimiter = "(";
-  std::string function_name = s.substr(0, s.find(delimiter));
-  Function &F = MF->getFunction();
-  Module *M = F.getParent();
   if (EnableFunctionStats) {
-    PrintStatisticsJSON(M->getSourceFileName() + "." + function_name);
+    PrintStatisticsJSON(filename, F.getName().data());
   }
   if (SetStatsFilename) {
     Filename = M->getSourceFileName() + "." + std::to_string(AssignmentPolicy) + std::to_string(RegionSplitPolicy) + std::to_string(LocalSplitPolicy) + ".json";
