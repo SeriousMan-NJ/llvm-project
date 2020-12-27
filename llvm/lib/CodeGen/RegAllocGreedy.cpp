@@ -3341,8 +3341,10 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     NamedRegionTimer T("spill", "Spiller", TimerGroupName,
                        TimerGroupDescription, TimePassesIsEnabled);
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
-    spiller().spill(LRE);
+
     SpillCosts += VirtReg.weight() * (VirtReg.getSize() + 25*SlotIndex::InstrDist); // denormalization;
+    spiller().spill(LRE);
+
     setStage(NewVRegs.begin(), NewVRegs.end(), RS_Done);
 
     // Tell LiveDebugVariables about the new ranges. Ranges not being covered by
