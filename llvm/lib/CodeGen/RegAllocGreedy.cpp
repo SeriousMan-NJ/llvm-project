@@ -204,6 +204,10 @@ static cl::opt<bool> loadPolicy("load-policy",
     cl::desc("Load policy from log file"),
     cl::init(false), cl::Hidden);
 
+static cl::opt<std::string> TargetPath("target-path",
+    cl::desc("Target path"),
+    cl::init(""), cl::Hidden);
+
 namespace {
 
 class RAGreedy : public MachineFunctionPass,
@@ -872,7 +876,7 @@ Register RAGreedy::tryAssign(LiveInterval &VirtReg,
                              SmallVectorImpl<Register> &NewVRegs,
                              const SmallVirtRegSet &FixedRegisters) {
   Register PhysReg;
-  if (AssignmentPolicy == 0) { // default policy
+  if (AssignmentPolicy == 0 || loadPolicy && AssignmentLogLoaded.size() == 0) { // default policy
     for (auto I = Order.begin(), E = Order.end(); I != E && !PhysReg; ++I) {
       assert(*I);
       if (!Matrix->checkInterference(VirtReg, *I)) {
@@ -903,11 +907,9 @@ Register RAGreedy::tryAssign(LiveInterval &VirtReg,
 
     unsigned index;
     if (loadPolicy && AssignmentLogLoaded.size() > 0) {
-      // errs() << "[GOOD]\n";
       index = *AssignmentLogLoaded.begin();
       AssignmentLogLoaded.erase(AssignmentLogLoaded.begin());
     } else {
-      // errs() << "[BAD]\n";
       index = rand() % Candidates.size();
     }
     AssignmentLog.push_back(index);
@@ -2147,7 +2149,7 @@ unsigned RAGreedy::calculateRegionSplitCost(LiveInterval &VirtReg,
     return BestCand;
   }
 
-  if (RegionSplitPolicy == 0) {
+  if (RegionSplitPolicy == 0 || loadPolicy && RegionSplitLogLoaded.size() == 0) {
     return BestCand;
   } else {
     unsigned i;
@@ -2621,9 +2623,11 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
   LiveRangeEdit LREdit(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
   SE->reset(LREdit);
 
-  if (LocalSplitPolicy == 1) {
+  if (LocalSplitPolicy == 1 && loadPolicy && LocalSplitLogLoaded.size() == 0) {
+    // do nothing
+  } else if (LocalSplitPolicy == 1) {
     unsigned i;
-    if (loadPolicy && LocalSplitLogLoaded.size()) {
+    if (loadPolicy && LocalSplitLogLoaded.size() > 0) {
       i = *LocalSplitLogLoaded.begin();
       LocalSplitLogLoaded.erase(LocalSplitLogLoaded.begin());
     } else {
@@ -3518,6 +3522,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   Function &F = mf.getFunction();
   Module *M = F.getParent();
   std::string filename = M->getSourceFileName() + ".fn." + std::to_string(AssignmentPolicy) + std::to_string(RegionSplitPolicy) + std::to_string(LocalSplitPolicy) + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
+  // std::string filename = M->getSourceFileName() + ".fn." + "100" + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
   // errs() << filename << "\n";
   char buff[100000];
   std::string key;
@@ -3613,7 +3618,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
 
   releaseMemory();
 
-  if (EnableFunctionStats) {
+  if (!loadPolicy && EnableFunctionStats && TargetPath.length() > 0 && filename.rfind(TargetPath, 0) == 0) {
     PrintStatisticsJSON(filename, F.getName().data());
   }
   if (SetStatsFilename) {
