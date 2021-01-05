@@ -208,6 +208,10 @@ static cl::opt<std::string> TargetPath("target-path",
     cl::desc("Target path"),
     cl::init(""), cl::Hidden);
 
+static cl::opt<std::string> OverridePolicy("override-policy",
+    cl::desc("Override policy"),
+    cl::init(""), cl::Hidden);
+
 namespace {
 
 class RAGreedy : public MachineFunctionPass,
@@ -3522,6 +3526,10 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   Function &F = mf.getFunction();
   Module *M = F.getParent();
   std::string filename = M->getSourceFileName() + ".fn." + std::to_string(AssignmentPolicy) + std::to_string(RegionSplitPolicy) + std::to_string(LocalSplitPolicy) + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
+  if (OverridePolicy.length() > 0) {
+    M->getSourceFileName() + ".fn." + OverridePolicy + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
+  }
+
   // std::string filename = M->getSourceFileName() + ".fn." + "100" + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
   // errs() << filename << "\n";
   char buff[100000];
