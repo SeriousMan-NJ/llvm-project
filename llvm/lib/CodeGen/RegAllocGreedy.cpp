@@ -916,7 +916,9 @@ Register RAGreedy::tryAssign(LiveInterval &VirtReg,
     } else {
       index = rand() % Candidates.size();
     }
-    AssignmentLog.push_back(index);
+    if (!loadPolicy) {
+      AssignmentLog.push_back(index);
+    }
     PhysReg = Candidates[index];
   }
 
@@ -2163,7 +2165,12 @@ unsigned RAGreedy::calculateRegionSplitCost(LiveInterval &VirtReg,
     } else {
       i = weightedRandomI(Weights);
     }
-    RegionSplitLog.push_back(i);
+    if (!loadPolicy) {
+      RegionSplitLog.push_back(i);
+    }
+    // errs() << "I: " << i << "\n";
+    // errs() << "NUM: " << NumCands << "\n";
+    // errs() << "CAND: " << Candidates[i] << "\n";
     return Candidates[i];
   }
 }
@@ -2637,9 +2644,15 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
     } else {
       i = weightedRandomF(Weights);
     }
-    LocalSplitLog.push_back(i);
+    if (!loadPolicy) {
+      LocalSplitLog.push_back(i);
+    }
     BestBefore = BestBefores[i];
     BestAfter = BestAfters[i];
+    // errs() << "I: " << i << "\n";
+    // errs() << "SIZE: " << BestBefores.size() << "," << BestAfters.size() << "\n";
+    // errs() << "IDX: " << BestBefore << "," << BestAfter << "\n";
+    // errs() << NumGaps << "\n";
   }
 
   SE->openIntv();
@@ -3535,8 +3548,8 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   std::string value;
   std::ifstream infile(filename + ".log");
   if (loadPolicy && !infile.is_open()) {
-    errs() << filename << " " << "not exists!\n";
-    assert(false);
+    // errs() << filename << " " << "not exists!\n";
+    // assert(false);
   }
   if (infile.is_open()) {
     while (infile.getline(buff, 100000)) {
