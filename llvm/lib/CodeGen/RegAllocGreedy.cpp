@@ -3527,11 +3527,9 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   Module *M = F.getParent();
   std::string filename = M->getSourceFileName() + ".fn." + std::to_string(AssignmentPolicy) + std::to_string(RegionSplitPolicy) + std::to_string(LocalSplitPolicy) + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
   if (OverridePolicy.length() > 0) {
-    M->getSourceFileName() + ".fn." + OverridePolicy + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
+    filename = M->getSourceFileName() + ".fn." + OverridePolicy + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
   }
 
-  // std::string filename = M->getSourceFileName() + ".fn." + "100" + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
-  // errs() << filename << "\n";
   char buff[100000];
   std::string key;
   std::string value;
