@@ -114,6 +114,8 @@ static float _SpillCosts;
 float SplitCosts;
 static float _SplitCosts;
 
+static unsigned FN;
+
 static std::mutex m;
 
 extern std::string Filename;
@@ -3510,6 +3512,7 @@ void RAGreedy::PrintStatisticsJSON(std::string filename, std::string function_na
 bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   m.lock(); // 통계를 위해서 한 번에 한 함수만 레지스터 할당을 수행해야 한다.
   // errs() << llvm::demangle(mf.getName().data()) << "\n";
+  FN++;
   _NumSpills = NumSpills.getValue();
   NumSpills = 0;
   _NumFolded = NumFolded.getValue();
@@ -3538,9 +3541,9 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
 
   Function &F = mf.getFunction();
   Module *M = F.getParent();
-  std::string filename = M->getSourceFileName() + ".fn." + std::to_string(AssignmentPolicy) + std::to_string(RegionSplitPolicy) + std::to_string(LocalSplitPolicy) + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
+  std::string filename = M->getSourceFileName() + ".fn." + std::to_string(AssignmentPolicy) + std::to_string(RegionSplitPolicy) + std::to_string(LocalSplitPolicy) + "." + std::to_string(FN);
   if (OverridePolicy.length() > 0) {
-    filename = M->getSourceFileName() + ".fn." + OverridePolicy + "." + std::to_string(std::hash<std::string>()(F.getName().str()));
+    filename = M->getSourceFileName() + ".fn." + OverridePolicy + "." + std::to_string(FN);
   }
 
   char buff[100000];
