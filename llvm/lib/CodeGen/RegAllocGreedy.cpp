@@ -212,6 +212,11 @@ static cl::opt<std::string> OverridePolicy("override-policy",
     cl::desc("Override policy"),
     cl::init(""), cl::Hidden);
 
+static cl::opt<int> SeperateFuncionStat(
+    "separate-function-stat", cl::Hidden,
+    cl::desc("Seperate function statistics"),
+    cl::init(-1));
+
 namespace {
 
 class RAGreedy : public MachineFunctionPass,
@@ -3462,10 +3467,14 @@ void RAGreedy::PrintStatisticsJSON(std::string filename, std::string function_na
   // }
 
   // 유의미한 통계가 잡혔을 때 혹은 처음
-  if (MinTotalCosts < 0 || MinTotalCosts > SpillCosts + SplitCosts) {
+  if (MinTotalCosts < 0 || MinTotalCosts > SpillCosts + SplitCosts || SeperateFuncionStat >= 0) {
     std::error_code EC;
-    raw_fd_ostream OS(filename + ".log", EC, sys::fs::OF_Text);
-    raw_fd_ostream OSJ(filename + ".json", EC, sys::fs::OF_Text);
+    std::string a = "";
+    if (SeperateFuncionStat >= 0) {
+      a += "." + std::to_string(SeperateFuncionStat);
+    }
+    raw_fd_ostream OS(filename + a + ".log", EC, sys::fs::OF_Text);
+    raw_fd_ostream OSJ(filename + a + ".json", EC, sys::fs::OF_Text);
     std::stringstream ss;
 
     const char* delim = " ";
@@ -3546,10 +3555,15 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   char buff[100000];
   std::string key;
   std::string value;
-  std::ifstream infile(filename + ".log");
+  std::string a = "";
+  if (SeperateFuncionStat >= 0) {
+    a += "." + std::to_string(SeperateFuncionStat);
+  }
+  std::ifstream infile(filename + a + ".log");
+  // errs() << filename + a + ".log" << "\n";
   if (loadPolicy && !infile.is_open()) {
     // errs() << filename << " " << "not exists!\n";
-    // assert(false);
+    assert(false);
   }
   if (infile.is_open()) {
     while (infile.getline(buff, 100000)) {
