@@ -706,12 +706,15 @@ namespace llvm {
                                    /// ranges.
     const Register Reg; // the register or stack slot of this interval.
     float Weight = 0.0; // weight of this interval
+    float SpillCost = 0.0; // spill weight of this interval
 
   public:
     Register reg() const { return Reg; }
     float weight() const { return Weight; }
+    float cost() const { return SpillCost; }
     void incrementWeight(float Inc) { Weight += Inc; }
     void setWeight(float Value) { Weight = Value; }
+    void setSpillCost(float Value) { SpillCost = Value; }
 
     LiveInterval(unsigned Reg, float Weight) : Reg(Reg), Weight(Weight) {}
 
@@ -813,7 +816,7 @@ namespace llvm {
     bool isSpillable() const { return Weight != huge_valf; }
 
     /// markNotSpillable - Mark interval as not spillable
-    void markNotSpillable() { Weight = huge_valf; }
+    void markNotSpillable() { SpillCost = Weight = huge_valf; }
 
     /// For a given lane mask @p LaneMask, compute indexes at which the
     /// lane is marked undefined by subregister <def,read-undef> definitions.

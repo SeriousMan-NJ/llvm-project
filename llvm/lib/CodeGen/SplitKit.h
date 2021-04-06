@@ -274,6 +274,7 @@ class LLVM_LIBRARY_VISIBILITY SplitEditor {
   const TargetRegisterInfo &TRI;
   const MachineBlockFrequencyInfo &MBFI;
   VirtRegAuxInfo &VRAI;
+  float SplitCost;
 
 public:
   /// ComplementSpillMode - Select how the complement live range should be
@@ -574,6 +575,10 @@ public:
   /// @param EnterAfter  When set, enter IntvOut after this point.
   void splitRegOutBlock(const SplitAnalysis::BlockInfo &BI,
                         unsigned IntvOut, SlotIndex EnterAfter);
+
+  float getSplitCost() {
+    return SplitCost;
+  }
 };
 
 } // end namespace llvm

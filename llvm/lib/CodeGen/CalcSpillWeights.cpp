@@ -158,6 +158,7 @@ float VirtRegAuxInfo::weightCalcHelper(LiveInterval &LI, SlotIndex *Start,
   MachineLoop *Loop = nullptr;
   bool IsExiting = false;
   float TotalWeight = 0;
+  float SpillCost = 0;
   unsigned NumInstr = 0; // Number of instructions using LI
   SmallPtrSet<MachineInstr *, 8> Visited;
 
@@ -276,6 +277,8 @@ float VirtRegAuxInfo::weightCalcHelper(LiveInterval &LI, SlotIndex *Start,
       CopyHints.insert(CopyHint(HintReg, HWeight));
   }
 
+  SpillCost = TotalWeight;
+
   // Pass all the sorted copy hints to mri.
   if (ShouldUpdateLI && CopyHints.size()) {
     // Remove a generic hint if previously added by target.
@@ -318,8 +321,12 @@ float VirtRegAuxInfo::weightCalcHelper(LiveInterval &LI, SlotIndex *Start,
   // it is a preferred candidate for spilling.
   // FIXME: this gets much more complicated once we support non-trivial
   // re-materialization.
-  if (isRematerializable(LI, LIS, VRM, *MF.getSubtarget().getInstrInfo()))
+  if (isRematerializable(LI, LIS, VRM, *MF.getSubtarget().getInstrInfo())) {
     TotalWeight *= 0.5F;
+    SpillCost *= 0.5F;
+  }
+
+  LI.setSpillCost(SpillCost);
 
   if (IsLocalSplitArtifact)
     return normalize(TotalWeight, Start->distance(*End), NumInstr);

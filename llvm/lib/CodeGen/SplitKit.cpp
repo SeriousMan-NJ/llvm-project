@@ -365,7 +365,7 @@ SplitEditor::SplitEditor(SplitAnalysis &SA, AliasAnalysis &AA,
       MRI(VRM.getMachineFunction().getRegInfo()), MDT(MDT),
       TII(*VRM.getMachineFunction().getSubtarget().getInstrInfo()),
       TRI(*VRM.getMachineFunction().getSubtarget().getRegisterInfo()),
-      MBFI(MBFI), VRAI(VRAI), RegAssign(Allocator) {}
+      MBFI(MBFI), VRAI(VRAI), RegAssign(Allocator), SplitCost(0.0) {}
 
 void SplitEditor::reset(LiveRangeEdit &LRE, ComplementSpillMode SM) {
   Edit = &LRE;
@@ -373,6 +373,7 @@ void SplitEditor::reset(LiveRangeEdit &LRE, ComplementSpillMode SM) {
   OpenIdx = 0;
   RegAssign.clear();
   Values.clear();
+  SplitCost = 0.0;
 
   // Reset the LiveIntervalCalc instances needed for this spill mode.
   LICalc[0].reset(&VRM.getMachineFunction(), LIS.getSlotIndexes(), &MDT,
@@ -468,6 +469,10 @@ VNInfo *SplitEditor::defValue(unsigned RegIdx,
   // Create a new value.
   VNInfo *VNI = LI->getNextValue(Idx, LIS.getVNInfoAllocator());
 
+  MachineBasicBlock *ValMBB = LIS.getMBBFromIndex(VNI->def);
+  SplitCost += LiveIntervals::getSpillWeight(true, false, &MBFI, ValMBB);
+  // errs() << "SplitCost:" << SplitCost << "\n";
+
   bool Force = LI->hasSubRanges();
   ValueForcePair FP(Force ? nullptr : VNI, Force);
   // Use insert for lookup, so we can add missing values with a second lookup.
@@ -490,6 +495,7 @@ VNInfo *SplitEditor::defValue(unsigned RegIdx,
 
   // This is a complex mapping, add liveness for VNI
   addDeadDef(*LI, VNI, Original);
+
   return VNI;
 }
 
@@ -1446,9 +1452,11 @@ void SplitEditor::finish(SmallVectorImpl<unsigned> *LRMap) {
   switch (SpillMode) {
   case SM_Partition:
     // Leave all back-copies as is.
+    errs() << "SM_Partition\n";
     break;
   case SM_Size:
   case SM_Speed:
+    errs() << "hoistCopies()\n";
     // hoistCopies will behave differently between size and speed.
     hoistCopies();
   }

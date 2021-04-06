@@ -110,6 +110,7 @@ protected:
 
   /// Method called when the allocator is about to remove a LiveInterval.
   virtual void aboutToRemoveInterval(LiveInterval &LI) {}
+  virtual float calcPotentialSpillCosts() { return -1; }
 
 public:
   /// VerifyEnabled - True when -verify-regalloc is given.

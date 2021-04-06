@@ -84,6 +84,7 @@ void RegAllocBase::seedLiveRegs() {
 // selectOrSplit implementation.
 void RegAllocBase::allocatePhysRegs() {
   seedLiveRegs();
+  errs() << "0:" << calcPotentialSpillCosts() << "\n";
 
   // Continue assigning vregs one at a time to available physical registers.
   while (LiveInterval *VirtReg = dequeue()) {
@@ -94,6 +95,7 @@ void RegAllocBase::allocatePhysRegs() {
       LLVM_DEBUG(dbgs() << "Dropping unused " << *VirtReg << '\n');
       aboutToRemoveInterval(*VirtReg);
       LIS->removeInterval(VirtReg->reg());
+      errs() << "1:" << calcPotentialSpillCosts() << "\n";
       continue;
     }
 
@@ -141,6 +143,7 @@ void RegAllocBase::allocatePhysRegs() {
 
       // Keep going after reporting the error.
       VRM->assignVirt2Phys(VirtReg->reg(), AllocOrder.front());
+      errs() << "2:" << calcPotentialSpillCosts() << "\n";
       continue;
     }
 
@@ -157,15 +160,19 @@ void RegAllocBase::allocatePhysRegs() {
         LLVM_DEBUG(dbgs() << "not queueing unused  " << *SplitVirtReg << '\n');
         aboutToRemoveInterval(*SplitVirtReg);
         LIS->removeInterval(SplitVirtReg->reg());
+        errs() << "3:" << calcPotentialSpillCosts() << "\n";
         continue;
       }
       LLVM_DEBUG(dbgs() << "queuing new interval: " << *SplitVirtReg << "\n");
       assert(Register::isVirtualRegister(SplitVirtReg->reg()) &&
              "expect split value in virtual register");
       enqueue(SplitVirtReg);
+      errs() << "s:" << calcPotentialSpillCosts() << "\n";
       ++NumNewQueued;
     }
+    errs() << "4:" << calcPotentialSpillCosts() << "\n";
   }
+  errs() << "5:" << calcPotentialSpillCosts() << "\n";
 }
 
 void RegAllocBase::postOptimization() {

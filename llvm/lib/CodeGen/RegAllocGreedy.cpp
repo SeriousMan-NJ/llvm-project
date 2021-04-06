@@ -136,6 +136,11 @@ static cl::opt<bool> ConsiderLocalIntervalCost(
              "candidate when choosing the best split candidate."),
     cl::init(false));
 
+static cl::opt<unsigned>
+SplitCostFactor("split-cost-factor",
+    cl::desc("Split cost factor compared to spill cost"),
+    cl::init(4), cl::Hidden);
+
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
 
@@ -171,6 +176,7 @@ class RAGreedy : public MachineFunctionPass,
   // state
   std::unique_ptr<Spiller> SpillerInstance;
   PQueue Queue;
+  std::map<LiveInterval*, float> SpillCostMap;
   unsigned NextCascade;
   std::unique_ptr<VirtRegAuxInfo> VRAI;
 
@@ -410,6 +416,8 @@ class RAGreedy : public MachineFunctionPass,
   /// Function
   ArrayRef<uint8_t> RegCosts;
 
+  float SpilledCost;
+
 public:
   RAGreedy();
 
@@ -559,6 +567,8 @@ private:
                                    FoldedSpills);
     }
   }
+
+  float calcPotentialSpillCosts() override;
 };
 
 } // end anonymous namespace
@@ -747,6 +757,7 @@ void RAGreedy::enqueue(PQueue &CurQueue, LiveInterval *LI) {
   // The virtual register number is a tie breaker for same-sized ranges.
   // Give lower vreg numbers higher priority to assign them first.
   CurQueue.push(std::make_pair(Prio, ~Reg));
+  SpillCostMap[LI] = LI->cost();
 }
 
 LiveInterval *RAGreedy::dequeue() { return dequeue(Queue); }
@@ -755,6 +766,7 @@ LiveInterval *RAGreedy::dequeue(PQueue &CurQueue) {
   if (CurQueue.empty())
     return nullptr;
   LiveInterval *LI = &LIS->getInterval(~CurQueue.top().second);
+  SpillCostMap.erase(LI);
   CurQueue.pop();
   return LI;
 }
@@ -1097,6 +1109,7 @@ void RAGreedy::evictInterference(LiveInterval &VirtReg, MCRegister PhysReg,
            "Cannot decrease cascade number, illegal eviction");
     ExtraRegInfo[Intf->reg()].Cascade = Cascade;
     ++NumEvicted;
+    errs() << "Evict\n";
     NewVRegs.push_back(Intf->reg());
   }
 }
@@ -2659,8 +2672,10 @@ unsigned RAGreedy::tryLastChanceRecoloring(LiveInterval &VirtReg,
     if (tryRecoloringCandidates(RecoloringQueue, CurrentNewVRegs,
                                 FixedRegisters, Depth)) {
       // Push the queued vregs into the main queue.
-      for (Register NewVReg : CurrentNewVRegs)
+      for (Register NewVReg : CurrentNewVRegs) {
+        errs() << "Recoloring\n";
         NewVRegs.push_back(NewVReg);
+      }
       // Do not mess up with the global assignment process.
       // I.e., VirtReg must be unassigned.
       Matrix->unassign(VirtReg);
@@ -2681,6 +2696,7 @@ unsigned RAGreedy::tryLastChanceRecoloring(LiveInterval &VirtReg,
     for (Register &R : CurrentNewVRegs) {
       if (RecoloringCandidates.count(&LIS->getInterval(R)))
         continue;
+      errs() << "Recoloring\n";
       NewVRegs.push_back(R);
     }
 
@@ -3059,6 +3075,7 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
   if (Stage < RS_Split) {
     setStage(VirtReg, RS_Split);
     LLVM_DEBUG(dbgs() << "wait for second round\n");
+    errs() << "Split\n";
     NewVRegs.push_back(VirtReg.reg());
     return 0;
   }
@@ -3095,7 +3112,9 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     NamedRegionTimer T("spill", "Spiller", TimerGroupName,
                        TimerGroupDescription, TimePassesIsEnabled);
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
+    errs() << "Spill\n";
     spiller().spill(LRE);
+    SpilledCost += VirtReg.cost();
     setStage(NewVRegs.begin(), NewVRegs.end(), RS_Done);
 
     // Tell LiveDebugVariables about the new ranges. Ranges not being covered by
@@ -3183,6 +3202,18 @@ void RAGreedy::reportNumberOfSplillsReloads(MachineLoop *L, unsigned &Reloads,
   }
 }
 
+float RAGreedy::calcPotentialSpillCosts() {
+  float TotalSpillCost = 0.0;
+  for (auto it = SpillCostMap.begin(); it != SpillCostMap.end(); it++) {
+    if (it->second != huge_valf && getStage(*it->first) < RS_Done)
+      TotalSpillCost += it->first->cost();
+  }
+  // errs() << "QUEUE:" << SpillCostMap.size() << "\n";
+  if (SplitCostFactor <= 0)
+    return TotalSpillCost + SpilledCost;
+  return TotalSpillCost + SpilledCost + SE->getSplitCost() / SplitCostFactor;
+}
+
 bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   LLVM_DEBUG(dbgs() << "********** GREEDY REGISTER ALLOCATION **********\n"
                     << "********** Function: " << mf.getName() << '\n');
@@ -3237,6 +3268,8 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   GlobalCand.resize(32);  // This will grow as needed.
   SetOfBrokenHints.clear();
   LastEvicted.clear();
+  SpillCostMap.clear();
+  SpilledCost = 0.0;
 
   allocatePhysRegs();
   tryHintsRecoloring();
