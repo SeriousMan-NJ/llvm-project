@@ -112,6 +112,15 @@ protected:
   virtual void aboutToRemoveInterval(LiveInterval &LI) {}
   virtual float calcPotentialSpillCosts() { return -1; }
 
+  void printCost(float cost);
+  void printCost(std::string msg);
+
+  float MinSpillCost;
+  int Round;
+  int MinRound;
+  int Limit;
+  bool Fallback;
+
 public:
   /// VerifyEnabled - True when -verify-regalloc is given.
   static bool VerifyEnabled;

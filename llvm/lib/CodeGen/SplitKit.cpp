@@ -1452,11 +1452,11 @@ void SplitEditor::finish(SmallVectorImpl<unsigned> *LRMap) {
   switch (SpillMode) {
   case SM_Partition:
     // Leave all back-copies as is.
-    errs() << "SM_Partition\n";
+    // errs() << "SM_Partition\n";
     break;
   case SM_Size:
   case SM_Speed:
-    errs() << "hoistCopies()\n";
+    // errs() << "hoistCopies()\n";
     // hoistCopies will behave differently between size and speed.
     hoistCopies();
   }

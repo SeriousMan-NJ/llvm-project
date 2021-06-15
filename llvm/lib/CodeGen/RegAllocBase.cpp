@@ -30,12 +30,18 @@
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
+#include <fstream>
+#include <vector>
 
 using namespace llvm;
 
 #define DEBUG_TYPE "regalloc"
 
 STATISTIC(NumNewQueued    , "Number of new live ranges queued");
+
+// Hysteresis to use when comparing floats.
+// This helps stabilize decisions based on float comparisons.
+static const float Hysteresis = (2007 / 2048.0f); // 0.97998046875
 
 // Temporary verification option until we can put verification inside
 // MachineVerifier.
@@ -46,6 +52,11 @@ static cl::opt<bool, true>
 const char RegAllocBase::TimerGroupName[] = "regalloc";
 const char RegAllocBase::TimerGroupDescription[] = "Register Allocation";
 bool RegAllocBase::VerifyEnabled = false;
+
+static cl::opt<bool> PrintCost(
+    "print-cost", cl::Hidden,
+    cl::desc("Print cost"),
+    cl::init(false));
 
 //===----------------------------------------------------------------------===//
 //                         RegAllocBase Implementation
@@ -80,22 +91,107 @@ void RegAllocBase::seedLiveRegs() {
   }
 }
 
+static int getRound(std::string filename) {
+  // return __INT_MAX__;
+  std::ifstream f(filename);
+  if (f.good()) {
+    // errs() << "GOOD\n";
+    std::string r;
+    getline(f, r);
+    return std::stoi(r);
+  } else {
+    errs() << "BAD\n";
+    return __INT_MAX__;
+  }
+}
+
+void RegAllocBase::printCost(std::string msg) {
+  if (!PrintCost) return;
+
+  const char* filename = "/home/ywshin/cost.txt";
+  std::error_code EC;
+  raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
+
+  MachineFunction &mf = VRM->getMachineFunction();
+  std::string moduleId = mf.getFunction().getParent()->getModuleIdentifier();
+  std::string functionName = mf.getName().str();
+  std::vector<std::string> moduleIds{"df-scan.c", "lcm.c", "ldecod_src/quant.c", "ldecod_src/erc_do_i.c", "x264_src/encoder/analyse.c", "x264_src/encoder/analyse.c"};
+  std::vector<std::string> functionNames{"df_uses_record", "pre_edge_lcm", "CalculateQuant4x4Param", "ercPixConcealIMB", "x264_weight_plane_analyse", "x264_slicetype_frame_cost"};
+
+  for (int i = 0; i < moduleIds.size(); i++) {
+    if (!moduleIds[i].compare(moduleId) && !functionNames[i].compare(functionName)) {
+      OS << msg << "\n";
+    }
+  }
+  // OS << msg << "\n";
+}
+
+void RegAllocBase::printCost(float cost) {
+  if (!PrintCost) return;
+
+  const char* filename = "/home/ywshin/cost.txt";
+  std::error_code EC;
+  raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
+
+  MachineFunction &mf = VRM->getMachineFunction();
+  std::string moduleId = mf.getFunction().getParent()->getModuleIdentifier();
+  std::string functionName = mf.getName().str();
+  std::vector<std::string> moduleIds{"df-scan.c", "lcm.c", "ldecod_src/quant.c", "ldecod_src/erc_do_i.c", "x264_src/encoder/analyse.c", "x264_src/encoder/analyse.c"};
+  std::vector<std::string> functionNames{"df_uses_record", "pre_edge_lcm", "CalculateQuant4x4Param", "ercPixConcealIMB", "x264_weight_plane_analyse", "x264_slicetype_frame_cost"};
+
+  for (int i = 0; i < moduleIds.size(); i++) {
+    if (!moduleIds[i].compare(moduleId) && !functionNames[i].compare(functionName)) {
+      if (cost < 0) {
+        OS << "<END OF FUNCTION:" << functionName << "> \n";
+        return;
+      }
+      OS << cost << "\n";
+    }
+  }
+  // if (cost < 0) {
+  //   OS << "<END OF FUNCTION:" << functionName << "> \n";
+  //   return;
+  // }
+  // OS << cost << "\n";
+}
+
 // Top-level driver to manage the queue of unassigned VirtRegs and call the
 // selectOrSplit implementation.
 void RegAllocBase::allocatePhysRegs() {
   seedLiveRegs();
-  errs() << "0:" << calcPotentialSpillCosts() << "\n";
+  // errs() << "0:" << calcPotentialSpillCosts() << "\n";
+  printCost(calcPotentialSpillCosts());
+  // errs() << calcPotentialSpillCosts() << "\n";
+  if (MinSpillCost >= calcPotentialSpillCosts() * Hysteresis)
+    MinSpillCost = calcPotentialSpillCosts();
 
+  MachineFunction &mf = VRM->getMachineFunction();
+  std::string filename = mf.getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(mf.getFunctionNumber()) + ".txt";
+  errs() << "FILENAME:" << filename << "\n";
+
+  Limit = getRound(filename);
   // Continue assigning vregs one at a time to available physical registers.
   while (LiveInterval *VirtReg = dequeue()) {
+    printCost("dequeue");
+    printCost(calcPotentialSpillCosts());
     assert(!VRM->hasPhys(VirtReg->reg()) && "Register already assigned");
+    Round++;
+    if (!Fallback && MinRound > Limit) {
+      report_fatal_error("MinRound has passed Limit");
+    }
 
     // Unused registers can appear when the spiller coalesces snippets.
     if (MRI->reg_nodbg_empty(VirtReg->reg())) {
       LLVM_DEBUG(dbgs() << "Dropping unused " << *VirtReg << '\n');
       aboutToRemoveInterval(*VirtReg);
       LIS->removeInterval(VirtReg->reg());
-      errs() << "1:" << calcPotentialSpillCosts() << "\n";
+      // errs() << "1:" << calcPotentialSpillCosts() << "\n";
+      if (!Fallback && MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
+        MinSpillCost = calcPotentialSpillCosts();
+        MinRound = Round;
+      }
+      printCost(calcPotentialSpillCosts());
+      // errs() << calcPotentialSpillCosts() << "\n";
       continue;
     }
 
@@ -143,12 +239,23 @@ void RegAllocBase::allocatePhysRegs() {
 
       // Keep going after reporting the error.
       VRM->assignVirt2Phys(VirtReg->reg(), AllocOrder.front());
-      errs() << "2:" << calcPotentialSpillCosts() << "\n";
+      // errs() << "2:" << calcPotentialSpillCosts() << "\n";
+      if (!Fallback && MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
+        MinSpillCost = calcPotentialSpillCosts();
+        MinRound = Round;
+      }
+      printCost(calcPotentialSpillCosts());
+      // errs() << calcPotentialSpillCosts() << "\n";
       continue;
     }
 
-    if (AvailablePhysReg)
+    if (AvailablePhysReg) {
+      printCost("assign");
+      printCost(calcPotentialSpillCosts());
       Matrix->assign(*VirtReg, AvailablePhysReg);
+    }
+
+    if (SplitVRegs.size() > 0) printCost(calcPotentialSpillCosts());
 
     for (Register Reg : SplitVRegs) {
       assert(LIS->hasInterval(Reg));
@@ -160,19 +267,38 @@ void RegAllocBase::allocatePhysRegs() {
         LLVM_DEBUG(dbgs() << "not queueing unused  " << *SplitVirtReg << '\n');
         aboutToRemoveInterval(*SplitVirtReg);
         LIS->removeInterval(SplitVirtReg->reg());
-        errs() << "3:" << calcPotentialSpillCosts() << "\n";
+        // errs() << "3:" << calcPotentialSpillCosts() << "\n";
         continue;
       }
       LLVM_DEBUG(dbgs() << "queuing new interval: " << *SplitVirtReg << "\n");
       assert(Register::isVirtualRegister(SplitVirtReg->reg()) &&
              "expect split value in virtual register");
       enqueue(SplitVirtReg);
-      errs() << "s:" << calcPotentialSpillCosts() << "\n";
+      // errs() << "s:" << calcPotentialSpillCosts() << "\n";
       ++NumNewQueued;
     }
-    errs() << "4:" << calcPotentialSpillCosts() << "\n";
+    // errs() << "4:" << calcPotentialSpillCosts() << "\n";
+    if (!Fallback && MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
+      MinSpillCost = calcPotentialSpillCosts();
+      MinRound = Round;
+    }
+    printCost("enqueue");
+    printCost(calcPotentialSpillCosts());
+    // errs() << calcPotentialSpillCosts() << "\n";
   }
-  errs() << "5:" << calcPotentialSpillCosts() << "\n";
+  // errs() << "5:" << calcPotentialSpillCosts() << "\n";
+  if (!Fallback && MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
+    MinSpillCost = calcPotentialSpillCosts();
+    MinRound = Round;
+  }
+
+  if (MinSpillCost * Hysteresis > calcPotentialSpillCosts()) {
+    errs() << "XXXXX:" << MinSpillCost << "\n";
+    errs() << "XXXXX:" << calcPotentialSpillCosts() << "\n";
+    // report_fatal_error("MinSpillCost * Hysteresis > calcPotentialSpillCosts() at the end of register allocation");
+  }
+  // printCost(calcPotentialSpillCosts());
+  // errs() << calcPotentialSpillCosts() << "\n";
 }
 
 void RegAllocBase::postOptimization() {

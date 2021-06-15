@@ -186,7 +186,7 @@ static void printVal(double Val, double Total, raw_ostream &OS) {
   if (Total < 1e-7)   // Avoid dividing by zero.
     OS << "        -----     ";
   else
-    OS << format("  %7.4f (%5.1f%%)", Val, Val*100/Total);
+    OS << format("  %9.6f (%5.1f%%)", Val, Val*100/Total);
 }
 
 void TimeRecord::print(const TimeRecord &Total, raw_ostream &OS) const {
@@ -376,6 +376,7 @@ void TimerGroup::PrintQueuedTimers(raw_ostream &OS) {
 
   Total.print(Total, OS);
   OS << "Total\n\n";
+  OS << "===" << std::string(73, '-') << "===\n";
   OS.flush();
 
   TimersToPrint.clear();
