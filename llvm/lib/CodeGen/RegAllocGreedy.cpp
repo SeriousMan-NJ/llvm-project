@@ -3060,7 +3060,7 @@ bool RAGreedy::spillInterferences(LiveInterval &VirtReg, MCRegister PhysReg,
     Q.collectInterferingVRegs();
     for (unsigned i = Q.interferingVRegs().size(); i; --i) {
       LiveInterval *Intf = Q.interferingVRegs()[i - 1];
-      if (!Intf->isSpillable() || Intf->weight() > VirtReg.weight())
+      if (!Intf->isSpillable() || Intf->cost() > VirtReg.cost())
         return false;
       Intfs.push_back(Intf);
     }
