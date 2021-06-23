@@ -3460,11 +3460,16 @@ void RAGreedy::maybeSuboptimal() {
         }
       }
 
+      std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
       if (n > 0 && num_inst > 0) {
-        if (n / (float)num_inst > 0.2 && num_inst > 100 && MinSpillCost < calcPotentialSpillCosts() * 0.90) {
+        if (n > 50 && n / (float)num_inst > 0.2 && num_inst > 100 && MinSpillCost < calcPotentialSpillCosts() * 0.90) {
           errs() << "INST: " << num_inst << "\n";
-          errs() << "BINGO: " << MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt\n";
-          OS << MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt\n";
+          errs() << "BINGO: " << filename << "\n";
+          // OS << n << "\n";
+          // OS << num_inst << "\n";
+          // OS << MinSpillCost << "\n";
+          // OS << calcPotentialSpillCosts() << "\n";
+          OS << filename << "\n";
         }
       }
     }
