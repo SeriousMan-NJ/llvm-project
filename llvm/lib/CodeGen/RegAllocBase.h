@@ -116,8 +116,11 @@ protected:
   void printCost(std::string msg);
 
   float MinSpillCost;
+  float MinThresholdCost;
   int Round;
   int MinRound;
+  int Threshold;
+  int MinThresholdRound;
   int Limit;
   bool Fallback;
 

@@ -30,6 +30,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/CodeGen/CalcSpillWeights.h"
 #include "llvm/CodeGen/EdgeBundles.h"
 #include "llvm/CodeGen/LiveInterval.h"
@@ -60,6 +61,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/IR/InstVisitor.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/BlockFrequency.h"
 #include "llvm/Support/BranchProbability.h"
@@ -78,6 +80,7 @@
 #include <utility>
 #include <fstream>
 #include <cstdio>
+#include <unistd.h>
 
 using namespace llvm;
 
@@ -146,17 +149,27 @@ SplitCostFactor("split-cost-factor",
 static cl::opt<bool>
 EnableFallback("enable-fallback",
     cl::desc("Enable fallback to basic"),
-    cl::init(true), cl::Hidden);
+    cl::init(false), cl::Hidden);
 
 static cl::opt<bool>
 WriteStat("write-stat",
     cl::desc("Write stat"),
-    cl::init(false), cl::Hidden);
+    cl::init(true), cl::Hidden);
 
 static cl::opt<bool>
 AppendStat("append-stat",
     cl::desc("Append stat"),
     cl::init(false), cl::Hidden);
+
+static cl::opt<bool>
+WritePatSubopt("write-pat-suboptimal",
+    cl::desc("Write patterned suboptimal"),
+    cl::init(false), cl::Hidden);
+
+cl::opt<int>
+LookaheadThreshold("lookahead-threshold",
+    cl::desc("Lookahead Threshold. -1 for infinite"),
+    cl::init(3), cl::Hidden);
 
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
@@ -165,7 +178,10 @@ namespace {
 
 class RAGreedy : public MachineFunctionPass,
                  public RegAllocBase,
-                 private LiveRangeEdit::Delegate {
+                 private LiveRangeEdit::Delegate,
+                 public InstVisitor<RAGreedy> {
+  LoopInfo *LI;
+
   // Convenient shortcuts.
   using PQueue = std::priority_queue<std::pair<unsigned, unsigned>>;
   using SmallLISet = SmallPtrSet<LiveInterval *, 4>;
@@ -593,6 +609,9 @@ private:
   // was successful, and append any new spilled/split intervals to splitLVRs.
   bool spillInterferences(LiveInterval &VirtReg, MCRegister PhysReg,
                           SmallVectorImpl<Register> &SplitVRegs);
+
+  /// maybe suboptimal splitting
+  void maybeSuboptimal();
 };
 
 } // end anonymous namespace
@@ -3347,6 +3366,8 @@ void RAGreedy::writeStat() {
   f << MinRound << "\n";
   f << Round << "\n";
   f << MinSpillCost << "\n";
+  f << MinThresholdRound << "\n";
+  f << MinThresholdCost << "\n";
   f << calcPotentialSpillCosts() << "\n";
   f << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
   f << MF->getName().str() << "\n";
@@ -3364,6 +3385,90 @@ void RAGreedy::appendStat() {
   OS << calcPotentialSpillCosts() << "\n";
   OS << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
   OS << MF->getName().str() << "\n";
+  OS.flush();
+}
+
+void RAGreedy::maybeSuboptimal() {
+  if (!WritePatSubopt) return;
+
+  std::string filename = "/home/ywshin/llvm-test-suite/maybe/" + std::to_string(getpid()) + ".txt";
+  std::error_code EC;
+  raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
+  for (MachineLoop *L : *Loops) {
+    int num_inst = 0;
+    std::vector<Register> v;
+    for (MachineBasicBlock *MBB : L->getBlocks()) {
+      // if (true || Loops->getLoopFor(MBB) == L)
+      for (MachineInstr &MI : *MBB) {
+        num_inst++;
+
+        for (int i = 0; i < MI.getNumOperands(); i++) {
+          auto operand = MI.getOperand(i);
+
+          if (!operand.isReg())
+            continue;
+
+          auto reg = operand.getReg();
+
+          if (reg.isPhysical() || !reg.isVirtual() || !reg.isValid() || reg.isStack())
+            continue;
+          if (MRI->reg_nodbg_empty(reg))
+            continue;
+
+          if(std::find(v.begin(), v.end(), reg) == v.end())
+            v.push_back(reg);
+        }
+      }
+      int n = 0;
+      // for (auto reg : v) {
+      //   auto &LI = LIS->getInterval(reg);
+      //   auto Order = AllocationOrder::create(LI.reg(), *VRM, RegClassInfo, Matrix);
+      //   for (auto I = Order.begin(), E = Order.end(); I != E; ++I) {
+      //     MCRegister PhysReg = *I;
+      //     for (MCRegUnitIterator Units(PhysReg, TRI); Units.isValid(); ++Units) {
+      //       LiveIntervalUnion::Query &Q = Matrix->query(LI, *Units);
+      //       // If there is 10 or more interferences, chances are one is heavier.
+      //       if (Q.collectInterferingVRegs(10) >= 5) {
+      //         // errs() << "BINGO: " << MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt\n";
+      //         n++;
+      //       }
+      //     }
+      //   }
+      // }
+
+      // errs() << n << "\n";
+      // errs() << num_inst << "\n";
+
+      // if (n / num_inst > 0.5) {
+      //   errs() << "BINGO: " << MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt\n";
+      // }
+
+      for (auto r1 : v) {
+        auto &L1 = LIS->getInterval(r1);
+        if (L1.empty()) continue;
+        int c = 0;
+        for (auto r2 : v) {
+          if (r1 == r2) continue;
+          auto &L2 = LIS->getInterval(r2);
+          if (L2.empty()) continue;
+          if (L1.overlaps(L2)) {
+            c++;
+          }
+        }
+        if (c >= 10) {
+          n++;
+        }
+      }
+
+      if (n > 0 && num_inst > 0) {
+        if (n / (float)num_inst > 0.2 && num_inst > 100 && MinSpillCost < calcPotentialSpillCosts() * 0.90) {
+          errs() << "INST: " << num_inst << "\n";
+          errs() << "BINGO: " << MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt\n";
+          OS << MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt\n";
+        }
+      }
+    }
+  }
   OS.flush();
 }
 
@@ -3433,10 +3538,15 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   SpillCostMap.clear();
   SpilledCost = 0.0;
   MinSpillCost = huge_valf;
+  MinThresholdCost = huge_valf;
   Round = 0;
   MinRound = 0;
+  MinThresholdRound = 0;
+  Threshold = LookaheadThreshold;
   Limit = 0;
   Fallback = false;
+
+  // maybeSuboptimal();
 
 {
   NamedRegionTimer T("regalloc", "Register allocation", TimerGroupName, TimerGroupDescription, true);
@@ -3459,6 +3569,8 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   NamedRegionTimer T("post-optimization", "Post Optimization", TimerGroupName, TimerGroupDescription, true);
   postOptimization();
 }
+  maybeSuboptimal();
+
   reportNumberOfSplillsReloads();
 
   releaseMemory();

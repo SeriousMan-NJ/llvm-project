@@ -32,6 +32,7 @@
 #include <cassert>
 #include <fstream>
 #include <vector>
+#include <limits>
 
 using namespace llvm;
 
@@ -39,9 +40,13 @@ using namespace llvm;
 
 STATISTIC(NumNewQueued    , "Number of new live ranges queued");
 
+extern int LookaheadThreshold;
+
 // Hysteresis to use when comparing floats.
 // This helps stabilize decisions based on float comparisons.
 static const float Hysteresis = (2007 / 2048.0f); // 0.97998046875
+
+static const float EPSILON = std::numeric_limits<float>::epsilon();
 
 // Temporary verification option until we can put verification inside
 // MachineVerifier.
@@ -162,8 +167,12 @@ void RegAllocBase::allocatePhysRegs() {
   // errs() << "0:" << calcPotentialSpillCosts() << "\n";
   printCost(calcPotentialSpillCosts());
   // errs() << calcPotentialSpillCosts() << "\n";
-  if (MinSpillCost >= calcPotentialSpillCosts() * Hysteresis)
+  if (MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
     MinSpillCost = calcPotentialSpillCosts();
+  }
+  if (MinThresholdCost >= calcPotentialSpillCosts() * Hysteresis) {
+    MinThresholdCost = calcPotentialSpillCosts();
+  }
 
   MachineFunction &mf = VRM->getMachineFunction();
   std::string filename = mf.getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(mf.getFunctionNumber()) + ".txt";
@@ -189,6 +198,15 @@ void RegAllocBase::allocatePhysRegs() {
       if (!Fallback && MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
         MinSpillCost = calcPotentialSpillCosts();
         MinRound = Round;
+      }
+      if (!Fallback && MinThresholdCost >= calcPotentialSpillCosts() * Hysteresis) {
+        if (Threshold > 0) {
+          MinThresholdCost = calcPotentialSpillCosts();
+          MinThresholdRound = Round;
+          Threshold = LookaheadThreshold;
+        }
+      } else if (!Fallback && MinThresholdCost < calcPotentialSpillCosts() * Hysteresis) {
+        Threshold--;
       }
       printCost(calcPotentialSpillCosts());
       // errs() << calcPotentialSpillCosts() << "\n";
@@ -244,6 +262,15 @@ void RegAllocBase::allocatePhysRegs() {
         MinSpillCost = calcPotentialSpillCosts();
         MinRound = Round;
       }
+      if (!Fallback && MinThresholdCost >= calcPotentialSpillCosts() * Hysteresis) {
+        if (Threshold > 0) {
+          MinThresholdCost = calcPotentialSpillCosts();
+          MinThresholdRound = Round;
+          Threshold = LookaheadThreshold;
+        }
+      } else if (!Fallback && MinThresholdCost < calcPotentialSpillCosts() * Hysteresis) {
+        Threshold--;
+      }
       printCost(calcPotentialSpillCosts());
       // errs() << calcPotentialSpillCosts() << "\n";
       continue;
@@ -282,6 +309,15 @@ void RegAllocBase::allocatePhysRegs() {
       MinSpillCost = calcPotentialSpillCosts();
       MinRound = Round;
     }
+    if (!Fallback && MinThresholdCost >= calcPotentialSpillCosts() * Hysteresis) {
+      if (Threshold > 0) {
+        MinThresholdCost = calcPotentialSpillCosts();
+        MinThresholdRound = Round;
+        Threshold = LookaheadThreshold;
+      }
+    } else if (!Fallback && MinThresholdCost < calcPotentialSpillCosts() * Hysteresis) {
+      Threshold--;
+    }
     printCost("enqueue");
     printCost(calcPotentialSpillCosts());
     // errs() << calcPotentialSpillCosts() << "\n";
@@ -290,6 +326,15 @@ void RegAllocBase::allocatePhysRegs() {
   if (!Fallback && MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
     MinSpillCost = calcPotentialSpillCosts();
     MinRound = Round;
+  }
+  if (!Fallback && MinThresholdCost >= calcPotentialSpillCosts() * Hysteresis) {
+    if (Threshold > 0) {
+      MinThresholdCost = calcPotentialSpillCosts();
+      MinThresholdRound = Round;
+      Threshold = LookaheadThreshold;
+    }
+  } else if (!Fallback && MinThresholdCost < calcPotentialSpillCosts() * Hysteresis) {
+    Threshold--;
   }
 
   if (MinSpillCost * Hysteresis > calcPotentialSpillCosts()) {
