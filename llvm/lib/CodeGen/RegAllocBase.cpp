@@ -40,8 +40,6 @@ using namespace llvm;
 
 STATISTIC(NumNewQueued    , "Number of new live ranges queued");
 
-extern int LookaheadThreshold;
-
 // Hysteresis to use when comparing floats.
 // This helps stabilize decisions based on float comparisons.
 static const float Hysteresis = (2007 / 2048.0f); // 0.97998046875

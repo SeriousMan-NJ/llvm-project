@@ -123,6 +123,8 @@ protected:
   int MinThresholdRound;
   int Limit;
   bool Fallback;
+  int LookaheadThreshold;
+  bool MaybeSuboptimal;
 
 public:
   /// VerifyEnabled - True when -verify-regalloc is given.

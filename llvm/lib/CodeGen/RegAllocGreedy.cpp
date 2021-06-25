@@ -154,7 +154,7 @@ EnableFallback("enable-fallback",
 static cl::opt<bool>
 WriteStat("write-stat",
     cl::desc("Write stat"),
-    cl::init(true), cl::Hidden);
+    cl::init(false), cl::Hidden);
 
 static cl::opt<bool>
 AppendStat("append-stat",
@@ -167,9 +167,14 @@ WritePatSubopt("write-pat-suboptimal",
     cl::init(false), cl::Hidden);
 
 cl::opt<int>
-LookaheadThreshold("lookahead-threshold",
+OptLookaheadThreshold("lookahead-threshold",
     cl::desc("Lookahead Threshold. -1 for infinite"),
-    cl::init(3), cl::Hidden);
+    cl::init(-1), cl::Hidden);
+
+static cl::opt<bool>
+OnlyMaybeSuboptimal("only-maybe-suboptimal",
+    cl::desc("Only maybe suboptimal"),
+    cl::init(false), cl::Hidden);
 
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
@@ -3079,7 +3084,7 @@ bool RAGreedy::spillInterferences(LiveInterval &VirtReg, MCRegister PhysReg,
     Q.collectInterferingVRegs();
     for (unsigned i = Q.interferingVRegs().size(); i; --i) {
       LiveInterval *Intf = Q.interferingVRegs()[i - 1];
-      if (!Intf->isSpillable() || Intf->cost() > VirtReg.cost())
+      if (!Intf->isSpillable() || Intf->weight() > VirtReg.weight())
         return false;
       Intfs.push_back(Intf);
     }
@@ -3107,6 +3112,27 @@ bool RAGreedy::spillInterferences(LiveInterval &VirtReg, MCRegister PhysReg,
   return true;
 }
 
+static bool isMaybeSuboptimal(std::string filename) {
+  if (!OnlyMaybeSuboptimal) true;
+
+  std::ifstream f(filename);
+  if (f.good()) {
+    std::string r;
+    getline(f, r);
+    getline(f, r);
+    getline(f, r);
+    getline(f, r);
+    getline(f, r);
+    getline(f, r);
+    getline(f, r);
+    // if (std::stod(r) > 0) errs() << "BINGO\n";
+    return std::stoi(r) > 0 ? true : false;
+  } else {
+    errs() << "PASS\n";
+    return false;
+  }
+}
+
 MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
                                        SmallVectorImpl<Register> &NewVRegs,
                                        SmallVirtRegSet &FixedRegisters,
@@ -3116,8 +3142,9 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
   auto Order =
       AllocationOrder::create(VirtReg.reg(), *VRM, RegClassInfo, Matrix);
 
-  if (EnableFallback && Round > Limit) {
-    // errs() << "TEST\n";
+  std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
+  if (isMaybeSuboptimal(filename) && EnableFallback && Round > Limit) {
+    errs() << "TEST\n";
     Fallback = true;
     // errs() << "NOW FALLBACK TO BASIC!\n";
     // Populate a list of physical register spill candidates.
@@ -3369,6 +3396,7 @@ void RAGreedy::writeStat() {
   f << MinThresholdRound << "\n";
   f << MinThresholdCost << "\n";
   f << calcPotentialSpillCosts() << "\n";
+  f << MaybeSuboptimal << "\n";
   f << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
   f << MF->getName().str() << "\n";
   f.close();
@@ -3470,6 +3498,7 @@ void RAGreedy::maybeSuboptimal() {
           // OS << MinSpillCost << "\n";
           // OS << calcPotentialSpillCosts() << "\n";
           OS << filename << "\n";
+          MaybeSuboptimal = true;
         }
       }
     }
@@ -3547,9 +3576,11 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   Round = 0;
   MinRound = 0;
   MinThresholdRound = 0;
-  Threshold = LookaheadThreshold;
+  LookaheadThreshold = OptLookaheadThreshold;
+  Threshold = OptLookaheadThreshold;
   Limit = 0;
   Fallback = false;
+  MaybeSuboptimal = false;
 
   // maybeSuboptimal();
 
@@ -3557,14 +3588,6 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   NamedRegionTimer T("regalloc", "Register allocation", TimerGroupName, TimerGroupDescription, true);
   allocatePhysRegs();
 }
-
-  if (WriteStat)
-    writeStat();
-
-  if (AppendStat)
-    appendStat();
-
-  printCost(-1);
 
   tryHintsRecoloring();
 
@@ -3574,7 +3597,16 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   NamedRegionTimer T("post-optimization", "Post Optimization", TimerGroupName, TimerGroupDescription, true);
   postOptimization();
 }
+
   maybeSuboptimal();
+
+  if (WriteStat)
+    writeStat();
+
+  if (AppendStat)
+    appendStat();
+
+  printCost(-1);
 
   reportNumberOfSplillsReloads();
 
