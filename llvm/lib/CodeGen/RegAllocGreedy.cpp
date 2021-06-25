@@ -154,7 +154,7 @@ EnableFallback("enable-fallback",
 static cl::opt<bool>
 WriteStat("write-stat",
     cl::desc("Write stat"),
-    cl::init(false), cl::Hidden);
+    cl::init(true), cl::Hidden);
 
 static cl::opt<bool>
 AppendStat("append-stat",
@@ -3113,7 +3113,7 @@ bool RAGreedy::spillInterferences(LiveInterval &VirtReg, MCRegister PhysReg,
 }
 
 static bool isMaybeSuboptimal(std::string filename) {
-  if (!OnlyMaybeSuboptimal) true;
+  if (!OnlyMaybeSuboptimal) return true;
 
   std::ifstream f(filename);
   if (f.good()) {
