@@ -38,6 +38,7 @@
 
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/CodeGen/RegisterClassInfo.h"
+#include "llvm/ADT/IndexedMap.h"
 
 namespace llvm {
 
@@ -112,9 +113,6 @@ protected:
   virtual void aboutToRemoveInterval(LiveInterval &LI) {}
   virtual float calcPotentialSpillCosts() { return -1; }
 
-  void printCost(float cost);
-  void printCost(std::string msg);
-
   float MinSpillCost;
   float MinThresholdCost;
   int Round;
@@ -125,6 +123,63 @@ protected:
   bool Fallback;
   int LookaheadThreshold;
   bool MaybeSuboptimal;
+
+  // Live ranges pass through a number of stages as we try to allocate them.
+  // Some of the stages may also create new live ranges:
+  //
+  // - Region splitting.
+  // - Per-block splitting.
+  // - Local splitting.
+  // - Spilling.
+  //
+  // Ranges produced by one of the stages skip the previous stages when they are
+  // dequeued. This improves performance because we can skip interference checks
+  // that are unlikely to give any results. It also guarantees that the live
+  // range splitting algorithm terminates, something that is otherwise hard to
+  // ensure.
+  enum LiveRangeStage {
+    /// Newly created live range that has never been queued.
+    RS_New,
+
+    /// Only attempt assignment and eviction. Then requeue as RS_Split.
+    RS_Assign,
+
+    /// Attempt live range splitting if assignment is impossible.
+    RS_Split,
+
+    /// Attempt more aggressive live range splitting that is guaranteed to make
+    /// progress.  This is used for split products that may not be making
+    /// progress.
+    RS_Split2,
+
+    /// Live range will be spilled.  No more splitting will be attempted.
+    RS_Spill,
+
+
+    /// Live range is in memory. Because of other evictions, it might get moved
+    /// in a register in the end.
+    RS_Memory,
+
+    /// There is nothing more we can do to this live range.  Abort compilation
+    /// if it can't be assigned.
+    RS_Done
+  };
+
+  // RegInfo - Keep additional information about each live range.
+  struct RegInfo {
+    LiveRangeStage Stage = RS_New;
+
+    // Cascade - Eviction loop prevention. See canEvictInterference().
+    unsigned Cascade = 0;
+
+    RegInfo() = default;
+  };
+
+  IndexedMap<RegInfo, VirtReg2IndexFunctor> ExtraRegInfo;
+
+  void printCost(float cost);
+  void printCost(std::string msg);
+  void printStage(LiveRangeStage stage);
 
 public:
   /// VerifyEnabled - True when -verify-regalloc is given.

@@ -218,46 +218,46 @@ class RAGreedy : public MachineFunctionPass,
   unsigned NextCascade;
   std::unique_ptr<VirtRegAuxInfo> VRAI;
 
-  // Live ranges pass through a number of stages as we try to allocate them.
-  // Some of the stages may also create new live ranges:
-  //
-  // - Region splitting.
-  // - Per-block splitting.
-  // - Local splitting.
-  // - Spilling.
-  //
-  // Ranges produced by one of the stages skip the previous stages when they are
-  // dequeued. This improves performance because we can skip interference checks
-  // that are unlikely to give any results. It also guarantees that the live
-  // range splitting algorithm terminates, something that is otherwise hard to
-  // ensure.
-  enum LiveRangeStage {
-    /// Newly created live range that has never been queued.
-    RS_New,
+  // // Live ranges pass through a number of stages as we try to allocate them.
+  // // Some of the stages may also create new live ranges:
+  // //
+  // // - Region splitting.
+  // // - Per-block splitting.
+  // // - Local splitting.
+  // // - Spilling.
+  // //
+  // // Ranges produced by one of the stages skip the previous stages when they are
+  // // dequeued. This improves performance because we can skip interference checks
+  // // that are unlikely to give any results. It also guarantees that the live
+  // // range splitting algorithm terminates, something that is otherwise hard to
+  // // ensure.
+  // enum LiveRangeStage {
+  //   /// Newly created live range that has never been queued.
+  //   RS_New,
 
-    /// Only attempt assignment and eviction. Then requeue as RS_Split.
-    RS_Assign,
+  //   /// Only attempt assignment and eviction. Then requeue as RS_Split.
+  //   RS_Assign,
 
-    /// Attempt live range splitting if assignment is impossible.
-    RS_Split,
+  //   /// Attempt live range splitting if assignment is impossible.
+  //   RS_Split,
 
-    /// Attempt more aggressive live range splitting that is guaranteed to make
-    /// progress.  This is used for split products that may not be making
-    /// progress.
-    RS_Split2,
+  //   /// Attempt more aggressive live range splitting that is guaranteed to make
+  //   /// progress.  This is used for split products that may not be making
+  //   /// progress.
+  //   RS_Split2,
 
-    /// Live range will be spilled.  No more splitting will be attempted.
-    RS_Spill,
+  //   /// Live range will be spilled.  No more splitting will be attempted.
+  //   RS_Spill,
 
 
-    /// Live range is in memory. Because of other evictions, it might get moved
-    /// in a register in the end.
-    RS_Memory,
+  //   /// Live range is in memory. Because of other evictions, it might get moved
+  //   /// in a register in the end.
+  //   RS_Memory,
 
-    /// There is nothing more we can do to this live range.  Abort compilation
-    /// if it can't be assigned.
-    RS_Done
-  };
+  //   /// There is nothing more we can do to this live range.  Abort compilation
+  //   /// if it can't be assigned.
+  //   RS_Done
+  // };
 
   // Enum CutOffStage to keep a track whether the register allocation failed
   // because of the cutoffs encountered in last chance recoloring.
@@ -279,17 +279,17 @@ class RAGreedy : public MachineFunctionPass,
   static const char *const StageName[];
 #endif
 
-  // RegInfo - Keep additional information about each live range.
-  struct RegInfo {
-    LiveRangeStage Stage = RS_New;
+  // // RegInfo - Keep additional information about each live range.
+  // struct RegInfo {
+  //   LiveRangeStage Stage = RS_New;
 
-    // Cascade - Eviction loop prevention. See canEvictInterference().
-    unsigned Cascade = 0;
+  //   // Cascade - Eviction loop prevention. See canEvictInterference().
+  //   unsigned Cascade = 0;
 
-    RegInfo() = default;
-  };
+  //   RegInfo() = default;
+  // };
 
-  IndexedMap<RegInfo, VirtReg2IndexFunctor> ExtraRegInfo;
+  // IndexedMap<RegInfo, VirtReg2IndexFunctor> ExtraRegInfo;
 
   LiveRangeStage getStage(const LiveInterval &VirtReg) const {
     return ExtraRegInfo[VirtReg.reg()].Stage;
@@ -3417,8 +3417,6 @@ void RAGreedy::appendStat() {
 }
 
 void RAGreedy::maybeSuboptimal() {
-  if (!WritePatSubopt) return;
-
   std::string filename = "/home/ywshin/llvm-test-suite/maybe/" + std::to_string(getpid()) + ".txt";
   std::error_code EC;
   raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
@@ -3493,11 +3491,13 @@ void RAGreedy::maybeSuboptimal() {
         if (n > 50 && n / (float)num_inst > 0.2 && num_inst > 100 && MinSpillCost < calcPotentialSpillCosts() * 0.90) {
           errs() << "INST: " << num_inst << "\n";
           errs() << "BINGO: " << filename << "\n";
-          // OS << n << "\n";
-          // OS << num_inst << "\n";
-          // OS << MinSpillCost << "\n";
-          // OS << calcPotentialSpillCosts() << "\n";
-          OS << filename << "\n";
+          if (WritePatSubopt) {
+            // OS << n << "\n";
+            // OS << num_inst << "\n";
+            // OS << MinSpillCost << "\n";
+            // OS << calcPotentialSpillCosts() << "\n";
+            OS << filename << "\n";
+          }
           MaybeSuboptimal = true;
         }
       }

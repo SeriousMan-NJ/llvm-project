@@ -61,6 +61,11 @@ static cl::opt<bool> PrintCost(
     cl::desc("Print cost"),
     cl::init(false));
 
+static cl::opt<bool> PrintStage(
+    "print-stage", cl::Hidden,
+    cl::desc("Print stage"),
+    cl::init(false));
+
 //===----------------------------------------------------------------------===//
 //                         RegAllocBase Implementation
 //===----------------------------------------------------------------------===//
@@ -158,6 +163,20 @@ void RegAllocBase::printCost(float cost) {
   // OS << cost << "\n";
 }
 
+void RegAllocBase::printStage(LiveRangeStage stage) {
+  if (!PrintStage) return;
+
+  const char* filename = "/home/ywshin/stage.txt";
+  std::error_code EC;
+  raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
+
+  MachineFunction &mf = VRM->getMachineFunction();
+  std::string moduleId = mf.getFunction().getParent()->getModuleIdentifier();
+  std::string functionName = mf.getName().str();
+
+  OS << stage << "\n";
+}
+
 // Top-level driver to manage the queue of unassigned VirtRegs and call the
 // selectOrSplit implementation.
 void RegAllocBase::allocatePhysRegs() {
@@ -177,6 +196,7 @@ void RegAllocBase::allocatePhysRegs() {
   errs() << "FILENAME:" << filename << "\n";
 
   Limit = getRound(filename);
+  // printStage(ExtraRegInfo[VirtReg->reg()].Stage);
   // Continue assigning vregs one at a time to available physical registers.
   while (LiveInterval *VirtReg = dequeue()) {
     printCost("dequeue");
