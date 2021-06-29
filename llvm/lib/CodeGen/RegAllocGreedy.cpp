@@ -2504,11 +2504,12 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
 unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
                             SmallVectorImpl<Register> &NewVRegs,
                             const SmallVirtRegSet &FixedRegisters) {
+  std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
   // Ranges must be Split2 or less.
   if (getStage(VirtReg) >= RS_Spill) {
     if (VirtReg.stage) {
       setDetailedStage(VirtReg, RS_Not_Split);
-      printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+      printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage, filename);
       VirtReg.stage = false;
     }
     return 0;
@@ -2523,14 +2524,14 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
     if (PhysReg || !NewVRegs.empty()) {
       if (VirtReg.stage) {
         setDetailedStage(VirtReg, RS_Local_Split);
-        printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+        printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage, filename);
         VirtReg.stage = false;
       }
       return PhysReg;
     }
     if (tryInstructionSplit(VirtReg, Order, NewVRegs) && VirtReg.stage) {
       setDetailedStage(VirtReg, RS_Instruction_Split);
-      printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+      printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage, filename);
       VirtReg.stage = false;
     } else if (VirtReg.stage) {
       setDetailedStage(VirtReg, RS_Not_Split);
@@ -2554,7 +2555,7 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
     if (Register PhysReg = tryAssign(VirtReg, Order, NewVRegs, FixedRegisters)) {
       if (VirtReg.stage) {
         setDetailedStage(VirtReg, RS_Not_Split);
-        printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+        printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage, filename);
         VirtReg.stage = false;
       }
       return PhysReg;
@@ -2569,7 +2570,7 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
     if (PhysReg || !NewVRegs.empty()) {
       if (VirtReg.stage) {
         setDetailedStage(VirtReg, RS_Region_Split);
-        printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+        printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage, filename);
         VirtReg.stage = false;
       }
       return PhysReg;
@@ -2579,11 +2580,11 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
   // Then isolate blocks.
   if (tryBlockSplit(VirtReg, Order, NewVRegs) && VirtReg.stage) {
     setDetailedStage(VirtReg, RS_Block_Split);
-    printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+    printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage, filename);
     VirtReg.stage = false;
   } else if (VirtReg.stage) {
     setDetailedStage(VirtReg, RS_Not_Split);
-    printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+    printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage, filename);
     VirtReg.stage = false;
   }
   return 0;
@@ -3344,9 +3345,9 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     setStage(NewVRegs.begin(), NewVRegs.end(), RS_Done);
     SpilledCost += VirtReg.cost();
 
-    for (auto r : NewVRegs) {
-      LIS->getInterval(r).setSpillCost(0);
-    }
+    // for (auto r : NewVRegs) {
+    //   LIS->getInterval(r).setSpillCost(0);
+    // }
 
     // Tell LiveDebugVariables about the new ranges. Ranges not being covered by
     // the new regs are kept in LDV (still mapping to the old register), until

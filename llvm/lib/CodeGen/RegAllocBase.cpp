@@ -192,11 +192,11 @@ void RegAllocBase::printStage(LiveRangeStage stage, int detailed_stage, std::str
   std::string moduleId = mf.getFunction().getParent()->getModuleIdentifier();
   std::string functionName = mf.getName().str();
 
-  if (detailed_stage == -2) {
+  // if (detailed_stage == -2) {
     OS << stage << "," << detailed_stage << "," << f << "\n";
-  } else {
-    OS << stage << "," << detailed_stage << "\n";
-  }
+  // } else {
+  //   OS << stage << "," << detailed_stage << "\n";
+  // }
 }
 
 // Top-level driver to manage the queue of unassigned VirtRegs and call the
@@ -231,7 +231,7 @@ void RegAllocBase::allocatePhysRegs() {
     }
 
     if (Round == Limit && isSuboptimal(filename)) {
-      printStage(ExtraRegInfo[VirtReg->reg()].Stage, -1);
+      printStage(ExtraRegInfo[VirtReg->reg()].Stage, -1, filename);
       VirtReg->stage = true;
     }
 
