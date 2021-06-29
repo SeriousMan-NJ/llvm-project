@@ -64,7 +64,7 @@ static cl::opt<bool> PrintCost(
 static cl::opt<bool> PrintStage(
     "print-stage", cl::Hidden,
     cl::desc("Print stage"),
-    cl::init(true));
+    cl::init(false));
 
 static cl::opt<bool> CheckMinRoundLimit(
     "check-minround-limit", cl::Hidden,
