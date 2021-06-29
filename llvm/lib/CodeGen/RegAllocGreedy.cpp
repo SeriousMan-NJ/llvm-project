@@ -176,6 +176,11 @@ OnlyMaybeSuboptimal("only-maybe-suboptimal",
     cl::desc("Only maybe suboptimal"),
     cl::init(false), cl::Hidden);
 
+static cl::opt<bool>
+OnlyOverCostThreshold("only-over-cost-threshold",
+    cl::desc("Only over cost threhold"),
+    cl::init(false), cl::Hidden);
+
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
 
@@ -3178,6 +3183,42 @@ static bool isMaybeSuboptimal(std::string filename) {
   }
 }
 
+static std::string prev_filename = "";
+
+static bool overCostThreshold(std::string filename) {
+  if (!OnlyOverCostThreshold) return true;
+
+  std::ifstream f(filename);
+  if (f.good()) {
+    std::string t;
+    std::string r1;
+    std::string r2;
+    std::string c1;
+    std::string c2;
+    getline(f, r1);
+    getline(f, r2);
+    getline(f, c1);
+    getline(f, t);
+    getline(f, t);
+    getline(f, c2);
+    getline(f, t);
+
+    bool flag = std::stoi(r1) < std::stoi(r2) && std::stof(c1) < std::stof(c2) * 0.8;
+    if (flag && prev_filename != filename) {
+      const char* f = "/home/ywshin/threshold.txt";
+      std::error_code EC;
+      raw_fd_ostream OS(f, EC, sys::fs::OF_Append);
+      OS << filename << "\n";
+      OS.flush();
+      prev_filename = filename;
+    }
+    return flag;
+  } else {
+    errs() << "PASS\n";
+    return false;
+  }
+}
+
 MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
                                        SmallVectorImpl<Register> &NewVRegs,
                                        SmallVirtRegSet &FixedRegisters,
@@ -3188,7 +3229,7 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
       AllocationOrder::create(VirtReg.reg(), *VRM, RegClassInfo, Matrix);
 
   std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
-  if (isMaybeSuboptimal(filename) && EnableFallback && Round > Limit) {
+  if (isMaybeSuboptimal(filename) && overCostThreshold(filename) && EnableFallback && Round > Limit) {
     errs() << "TEST\n";
     Fallback = true;
     // errs() << "NOW FALLBACK TO BASIC!\n";
