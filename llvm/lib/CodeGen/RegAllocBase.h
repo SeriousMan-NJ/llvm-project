@@ -162,7 +162,13 @@ protected:
 
     /// There is nothing more we can do to this live range.  Abort compilation
     /// if it can't be assigned.
-    RS_Done
+    RS_Done,
+
+    RS_Instruction_Split,
+    RS_Local_Split,
+    RS_Block_Split,
+    RS_Region_Split,
+    RS_Not_Split
   };
 
   // RegInfo - Keep additional information about each live range.
@@ -176,10 +182,11 @@ protected:
   };
 
   IndexedMap<RegInfo, VirtReg2IndexFunctor> ExtraRegInfo;
+  IndexedMap<RegInfo, VirtReg2IndexFunctor> DetailedRegStageInfo;
 
   void printCost(float cost);
   void printCost(std::string msg);
-  void printStage(LiveRangeStage stage);
+  void printStage(LiveRangeStage stage, int detailed_stage, std::string f="");
 
 public:
   /// VerifyEnabled - True when -verify-regalloc is given.

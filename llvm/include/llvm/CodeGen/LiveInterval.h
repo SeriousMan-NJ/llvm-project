@@ -709,6 +709,7 @@ namespace llvm {
     float SpillCost = 0.0; // spill weight of this interval
 
   public:
+    bool stage = false;
     Register reg() const { return Reg; }
     float weight() const { return Weight; }
     float cost() const { return SpillCost; }

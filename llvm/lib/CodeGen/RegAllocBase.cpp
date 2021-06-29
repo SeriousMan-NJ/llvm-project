@@ -64,7 +64,12 @@ static cl::opt<bool> PrintCost(
 static cl::opt<bool> PrintStage(
     "print-stage", cl::Hidden,
     cl::desc("Print stage"),
-    cl::init(false));
+    cl::init(true));
+
+static cl::opt<bool> CheckMinRoundLimit(
+    "check-minround-limit", cl::Hidden,
+    cl::desc("Check MinRound Limit"),
+    cl::init(true));
 
 //===----------------------------------------------------------------------===//
 //                         RegAllocBase Implementation
@@ -110,6 +115,19 @@ static int getRound(std::string filename) {
   } else {
     errs() << "BAD\n";
     return __INT_MAX__;
+  }
+}
+
+static bool isSuboptimal(std::string filename) {
+  std::ifstream f(filename);
+  if (f.good()) {
+    std::string s1;
+    std::string s2;
+    getline(f, s1);
+    getline(f, s2);
+    return std::stoi(s1) < std::stoi(s2);
+  } else {
+    return false;
   }
 }
 
@@ -163,7 +181,7 @@ void RegAllocBase::printCost(float cost) {
   // OS << cost << "\n";
 }
 
-void RegAllocBase::printStage(LiveRangeStage stage) {
+void RegAllocBase::printStage(LiveRangeStage stage, int detailed_stage, std::string f) {
   if (!PrintStage) return;
 
   const char* filename = "/home/ywshin/stage.txt";
@@ -174,7 +192,11 @@ void RegAllocBase::printStage(LiveRangeStage stage) {
   std::string moduleId = mf.getFunction().getParent()->getModuleIdentifier();
   std::string functionName = mf.getName().str();
 
-  OS << stage << "\n";
+  if (detailed_stage == -2) {
+    OS << stage << "," << detailed_stage << "," << f << "\n";
+  } else {
+    OS << stage << "," << detailed_stage << "\n";
+  }
 }
 
 // Top-level driver to manage the queue of unassigned VirtRegs and call the
@@ -196,15 +218,21 @@ void RegAllocBase::allocatePhysRegs() {
   errs() << "FILENAME:" << filename << "\n";
 
   Limit = getRound(filename);
-  // printStage(ExtraRegInfo[VirtReg->reg()].Stage);
   // Continue assigning vregs one at a time to available physical registers.
+  // LiveRangeStage stage = RS_New;
+  // LiveRangeStage detailed_stage = RS_New;
   while (LiveInterval *VirtReg = dequeue()) {
     printCost("dequeue");
     printCost(calcPotentialSpillCosts());
     assert(!VRM->hasPhys(VirtReg->reg()) && "Register already assigned");
     Round++;
-    if (!Fallback && MinRound > Limit) {
+    if (!Fallback && MinRound > Limit && CheckMinRoundLimit) {
       report_fatal_error("MinRound has passed Limit");
+    }
+
+    if (Round == Limit && isSuboptimal(filename)) {
+      printStage(ExtraRegInfo[VirtReg->reg()].Stage, -1);
+      VirtReg->stage = true;
     }
 
     // Unused registers can appear when the spiller coalesces snippets.
@@ -245,6 +273,7 @@ void RegAllocBase::allocatePhysRegs() {
 
     VirtRegVec SplitVRegs;
     MCRegister AvailablePhysReg = selectOrSplit(*VirtReg, SplitVRegs);
+    VirtReg->stage = false;
 
     if (AvailablePhysReg == ~0u) {
       // selectOrSplit failed to find a register!

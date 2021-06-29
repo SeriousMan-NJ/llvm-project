@@ -299,6 +299,10 @@ class RAGreedy : public MachineFunctionPass,
     ExtraRegInfo.resize(MRI->getNumVirtRegs());
     ExtraRegInfo[VirtReg.reg()].Stage = Stage;
   }
+  void setDetailedStage(const LiveInterval &VirtReg, LiveRangeStage Stage) {
+    DetailedRegStageInfo.resize(MRI->getNumVirtRegs());
+    DetailedRegStageInfo[VirtReg.reg()].Stage = Stage;
+  }
 
   template<typename Iterator>
   void setStage(Iterator Begin, Iterator End, LiveRangeStage NewStage) {
@@ -2091,7 +2095,7 @@ unsigned RAGreedy::tryBlockSplit(LiveInterval &VirtReg, AllocationOrder &Order,
 
   if (VerifyEnabled)
     MF->verify(this, "After splitting live range around basic blocks");
-  return 0;
+  return 1;
 }
 
 //===----------------------------------------------------------------------===//
@@ -2175,7 +2179,7 @@ RAGreedy::tryInstructionSplit(LiveInterval &VirtReg, AllocationOrder &Order,
 
   // Assign all new registers to RS_Spill. This was the last chance.
   setStage(LREdit.begin(), LREdit.end(), RS_Spill);
-  return 0;
+  return 1;
 }
 
 //===----------------------------------------------------------------------===//
@@ -2501,8 +2505,14 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
                             SmallVectorImpl<Register> &NewVRegs,
                             const SmallVirtRegSet &FixedRegisters) {
   // Ranges must be Split2 or less.
-  if (getStage(VirtReg) >= RS_Spill)
+  if (getStage(VirtReg) >= RS_Spill) {
+    if (VirtReg.stage) {
+      setDetailedStage(VirtReg, RS_Not_Split);
+      printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+      VirtReg.stage = false;
+    }
     return 0;
+  }
 
   // Local intervals are handled separately.
   if (LIS->intervalIsInOneMBB(VirtReg)) {
@@ -2511,9 +2521,23 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
     SA->analyze(&VirtReg);
     Register PhysReg = tryLocalSplit(VirtReg, Order, NewVRegs);
     if (PhysReg || !NewVRegs.empty()) {
+      if (VirtReg.stage) {
+        setDetailedStage(VirtReg, RS_Local_Split);
+        printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+        VirtReg.stage = false;
+      }
       return PhysReg;
     }
-    return tryInstructionSplit(VirtReg, Order, NewVRegs);
+    if (tryInstructionSplit(VirtReg, Order, NewVRegs) && VirtReg.stage) {
+      setDetailedStage(VirtReg, RS_Instruction_Split);
+      printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+      VirtReg.stage = false;
+    } else if (VirtReg.stage) {
+      setDetailedStage(VirtReg, RS_Not_Split);
+      printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+      VirtReg.stage = false;
+    }
+    return 0;
   }
   NamedRegionTimer T("global_split", "Global Splitting", TimerGroupName,
                      TimerGroupDescription, true);
@@ -2527,8 +2551,14 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
   if (SA->didRepairRange()) {
     // VirtReg has changed, so all cached queries are invalid.
     Matrix->invalidateVirtRegs();
-    if (Register PhysReg = tryAssign(VirtReg, Order, NewVRegs, FixedRegisters))
+    if (Register PhysReg = tryAssign(VirtReg, Order, NewVRegs, FixedRegisters)) {
+      if (VirtReg.stage) {
+        setDetailedStage(VirtReg, RS_Not_Split);
+        printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+        VirtReg.stage = false;
+      }
       return PhysReg;
+    }
   }
 
   // First try to split around a region spanning multiple blocks. RS_Split2
@@ -2537,12 +2567,26 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
   if (getStage(VirtReg) < RS_Split2) {
     MCRegister PhysReg = tryRegionSplit(VirtReg, Order, NewVRegs);
     if (PhysReg || !NewVRegs.empty()) {
+      if (VirtReg.stage) {
+        setDetailedStage(VirtReg, RS_Region_Split);
+        printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+        VirtReg.stage = false;
+      }
       return PhysReg;
     }
   }
 
   // Then isolate blocks.
-  return tryBlockSplit(VirtReg, Order, NewVRegs);
+  if (tryBlockSplit(VirtReg, Order, NewVRegs) && VirtReg.stage) {
+    setDetailedStage(VirtReg, RS_Block_Split);
+    printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+    VirtReg.stage = false;
+  } else if (VirtReg.stage) {
+    setDetailedStage(VirtReg, RS_Not_Split);
+    printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+    VirtReg.stage = false;
+  }
+  return 0;
 }
 
 //===----------------------------------------------------------------------===//
@@ -3185,8 +3229,8 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     if (!VirtReg.isSpillable())
       return ~0u;
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
-    spiller().spill(LRE);
     SpilledCost += VirtReg.cost();
+    spiller().spill(LRE);
 
     // The live virtual register requesting allocation was spilled, so tell
     // the caller not to allocate anything during this round.
@@ -3195,6 +3239,11 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
 
   if (MCRegister PhysReg =
           tryAssign(VirtReg, Order, NewVRegs, FixedRegisters)) {
+    if (VirtReg.stage && ExtraRegInfo[VirtReg.reg()].Stage == RS_Split) {
+      setDetailedStage(VirtReg, RS_Not_Split);
+      printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
+      VirtReg.stage = false;
+    }
     // If VirtReg got an assignment, the eviction info is no longer relevant.
     LastEvicted.clearEvicteeInfo(VirtReg.reg());
     // When NewVRegs is not empty, we may have made decisions such as evicting
@@ -3265,9 +3314,14 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
 
   // If we couldn't allocate a register from spilling, there is probably some
   // invalid inline assembly. The base class will report it.
-  if (Stage >= RS_Done || !VirtReg.isSpillable())
+  if (Stage >= RS_Done || !VirtReg.isSpillable()) {
     return tryLastChanceRecoloring(VirtReg, Order, NewVRegs, FixedRegisters,
                                    Depth);
+  }
+
+  if (VirtReg.stage) {
+    printStage(ExtraRegInfo[VirtReg.reg()].Stage, -2, filename);
+  }
 
   // Finally spill VirtReg itself.
   if ((EnableDeferredSpilling ||
@@ -3286,9 +3340,13 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
     // errs() << "Spill\n";
     printCost("spill");
-    spiller().spill(LRE);
     SpilledCost += VirtReg.cost();
+    spiller().spill(LRE);
     setStage(NewVRegs.begin(), NewVRegs.end(), RS_Done);
+
+    for (auto r : NewVRegs) {
+      LIS->getInterval(r).setSpillCost(0);
+    }
 
     // Tell LiveDebugVariables about the new ranges. Ranges not being covered by
     // the new regs are kept in LDV (still mapping to the old register), until
