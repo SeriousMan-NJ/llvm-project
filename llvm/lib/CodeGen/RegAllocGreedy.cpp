@@ -3229,8 +3229,8 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     if (!VirtReg.isSpillable())
       return ~0u;
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
-    SpilledCost += VirtReg.cost();
     spiller().spill(LRE);
+    SpilledCost += VirtReg.cost();
 
     // The live virtual register requesting allocation was spilled, so tell
     // the caller not to allocate anything during this round.
@@ -3340,9 +3340,9 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
     // errs() << "Spill\n";
     printCost("spill");
-    SpilledCost += VirtReg.cost();
     spiller().spill(LRE);
     setStage(NewVRegs.begin(), NewVRegs.end(), RS_Done);
+    SpilledCost += VirtReg.cost();
 
     for (auto r : NewVRegs) {
       LIS->getInterval(r).setSpillCost(0);
