@@ -105,6 +105,8 @@ void RegAllocBase::seedLiveRegs() {
 }
 
 static int getRound(std::string filename) {
+  if (filename.find("mkl-dnn/tests/gtests") != std::string::npos) return __INT_MAX__;
+
   // return __INT_MAX__;
   std::ifstream f(filename);
   if (f.good()) {

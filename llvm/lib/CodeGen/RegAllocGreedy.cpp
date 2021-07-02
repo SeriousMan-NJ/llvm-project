@@ -154,7 +154,7 @@ EnableFallback("enable-fallback",
 static cl::opt<bool>
 WriteStat("write-stat",
     cl::desc("Write stat"),
-    cl::init(true), cl::Hidden);
+    cl::init(false), cl::Hidden);
 
 static cl::opt<bool>
 AppendStat("append-stat",
@@ -180,6 +180,11 @@ static cl::opt<bool>
 OnlyOverCostThreshold("only-over-cost-threshold",
     cl::desc("Only over cost threhold"),
     cl::init(false), cl::Hidden);
+
+static cl::opt<unsigned>
+EvictMode("evict-mode",
+          cl::desc("Eviction mode"),
+          cl::init(3), cl::Hidden);
 
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
@@ -1019,7 +1024,23 @@ bool RAGreedy::canEvictInterference(
       bool BreaksHint = VRM->hasPreferredPhys(Intf->reg());
       // Update eviction cost.
       Cost.BrokenHints += BreaksHint;
-      Cost.MaxWeight = std::max(Cost.MaxWeight, Intf->weight());
+
+      int a = Q.collectInterferingVRegs(5);
+      if (EvictMode == 0) {
+        if (MaxCost.MaxWeight < 0) MaxCost.MaxWeight = VirtReg.weight();
+        Cost.MaxWeight = std::max(Cost.MaxWeight, Intf->weight());
+      } else if (EvictMode == 1) {
+        if (MaxCost.MaxWeight < 0) MaxCost.MaxWeight = VirtReg.weight();
+        Cost.MaxWeight += Intf->weight();
+      } else if (EvictMode == 2) {
+        if (MaxCost.MaxWeight < 0) MaxCost.MaxWeight = VirtReg.weight()*0.2*a + VirtReg.weight()*(1 - 0.2*a);
+        Cost.MaxWeight += Intf->cost()*0.2*a + Intf->weight()*(1 - 0.2*a);
+      } else if (EvictMode == 3) {
+        if (MaxCost.MaxWeight < 0) MaxCost.MaxWeight = VirtReg.weight()*0.1*a + VirtReg.weight()*(1 - 0.1*a);
+        Cost.MaxWeight += Intf->cost()*0.1*a + Intf->weight()*(1 - 0.1*a);
+      } else {
+        report_fatal_error("Unsupported eviction mode!");
+      }
       // Abort if this would be too expensive.
       if (!(Cost < MaxCost))
         return false;
@@ -1204,7 +1225,7 @@ MCRegister RAGreedy::tryEvict(LiveInterval &VirtReg, AllocationOrder &Order,
   // hints, and only evict smaller spill weights.
   if (CostPerUseLimit < uint8_t(~0u)) {
     BestCost.BrokenHints = 0;
-    BestCost.MaxWeight = VirtReg.weight();
+    BestCost.MaxWeight = -1;
 
     // Check of any registers in RC are below CostPerUseLimit.
     const TargetRegisterClass *RC = MRI->getRegClass(VirtReg.reg());
