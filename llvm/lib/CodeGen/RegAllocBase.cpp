@@ -101,6 +101,7 @@ void RegAllocBase::seedLiveRegs() {
     if (MRI->reg_nodbg_empty(Reg))
       continue;
     enqueue(&LIS->getInterval(Reg));
+    VRegsToAlloc.insert(Reg);
   }
 }
 
@@ -275,6 +276,11 @@ void RegAllocBase::allocatePhysRegs() {
 
     VirtRegVec SplitVRegs;
     MCRegister AvailablePhysReg = selectOrSplit(*VirtReg, SplitVRegs);
+    if (AvailablePhysReg.isPBQP()) {
+      errs() << "PBQP!!!\n";
+      isPBQP = true;
+      return;
+    }
     VirtReg->stage = false;
 
     if (AvailablePhysReg == ~0u) {
@@ -329,6 +335,7 @@ void RegAllocBase::allocatePhysRegs() {
       printCost("assign");
       printCost(calcPotentialSpillCosts());
       Matrix->assign(*VirtReg, AvailablePhysReg);
+      VRegsToAlloc.erase(VirtReg->reg());
     }
 
     if (SplitVRegs.size() > 0) printCost(calcPotentialSpillCosts());
@@ -396,7 +403,8 @@ void RegAllocBase::allocatePhysRegs() {
 }
 
 void RegAllocBase::postOptimization() {
-  spiller().postOptimization();
+  if (!isPBQP)
+    spiller().postOptimization();
   for (auto DeadInst : DeadRemats) {
     LIS->RemoveMachineInstrFromMaps(*DeadInst);
     DeadInst->eraseFromParent();

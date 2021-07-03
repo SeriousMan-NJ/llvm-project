@@ -68,6 +68,9 @@ protected:
   LiveIntervals *LIS = nullptr;
   LiveRegMatrix *Matrix = nullptr;
   RegisterClassInfo RegClassInfo;
+  using RegSet = std::set<unsigned>;
+  RegSet VRegsToAlloc, EmptyIntervalVRegs;
+  bool isPBQP = false;
 
   /// Inst which is a def of an original reg and whose defs are already all
   /// dead after remat is saved in DeadRemats. The deletion of such inst is

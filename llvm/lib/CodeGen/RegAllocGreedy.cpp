@@ -71,6 +71,7 @@
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
+#include "RegAllocPBQP.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -185,6 +186,11 @@ static cl::opt<unsigned>
 EvictMode("evict-mode",
           cl::desc("Eviction mode"),
           cl::init(0), cl::Hidden);
+
+static cl::opt<bool>
+UsePBQP("use-pbqp",
+        cl::desc("Use PBQP"),
+        cl::init(false), cl::Hidden);
 
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
@@ -715,6 +721,7 @@ bool RAGreedy::LRE_CanEraseVirtReg(Register VirtReg) {
   LiveInterval &LI = LIS->getInterval(VirtReg);
   if (VRM->hasPhys(VirtReg)) {
     Matrix->unassign(LI);
+    VRegsToAlloc.insert(LI.reg());
     aboutToRemoveInterval(LI);
     return true;
   }
@@ -733,6 +740,7 @@ void RAGreedy::LRE_WillShrinkVirtReg(Register VirtReg) {
   // Register is assigned, put it back on the queue for reassignment.
   LiveInterval &LI = LIS->getInterval(VirtReg);
   Matrix->unassign(LI);
+  VRegsToAlloc.insert(LI.reg());
   enqueue(&LI);
 }
 
@@ -1184,6 +1192,7 @@ void RAGreedy::evictInterference(LiveInterval &VirtReg, MCRegister PhysReg,
     LastEvicted.addEviction(PhysReg, VirtReg.reg(), Intf->reg());
 
     Matrix->unassign(*Intf);
+    VRegsToAlloc.insert(Intf->reg());
     assert((ExtraRegInfo[Intf->reg()].Cascade < Cascade ||
             VirtReg.isSpillable() < Intf->isSpillable()) &&
            "Cannot decrease cascade number, illegal eviction");
@@ -2783,12 +2792,14 @@ unsigned RAGreedy::tryLastChanceRecoloring(LiveInterval &VirtReg,
       VirtRegToPhysReg[ItVirtReg] = VRM->getPhys(ItVirtReg);
       // unset the related struct.
       Matrix->unassign(*RC);
+      VRegsToAlloc.insert(RC->reg());
     }
 
     // Do as if VirtReg was assigned to PhysReg so that the underlying
     // recoloring has the right information about the interferes and
     // available colors.
     Matrix->assign(VirtReg, PhysReg);
+    VRegsToAlloc.erase(VirtReg.reg());
 
     // Save the current recoloring state.
     // If we cannot recolor all the interferences, we will have to start again
@@ -2804,6 +2815,7 @@ unsigned RAGreedy::tryLastChanceRecoloring(LiveInterval &VirtReg,
       // Do not mess up with the global assignment process.
       // I.e., VirtReg must be unassigned.
       Matrix->unassign(VirtReg);
+      VRegsToAlloc.insert(VirtReg.reg());
       return PhysReg;
     }
 
@@ -2813,6 +2825,7 @@ unsigned RAGreedy::tryLastChanceRecoloring(LiveInterval &VirtReg,
     // The recoloring attempt failed, undo the changes.
     FixedRegisters = SaveFixedRegisters;
     Matrix->unassign(VirtReg);
+    VRegsToAlloc.insert(VirtReg.reg());
 
     // For a newly created vreg which is also in RecoloringCandidates,
     // don't add it to NewVRegs because its physical register will be restored
@@ -2827,10 +2840,13 @@ unsigned RAGreedy::tryLastChanceRecoloring(LiveInterval &VirtReg,
 
     for (LiveInterval *RC : RecoloringCandidates) {
       Register ItVirtReg = RC->reg();
-      if (VRM->hasPhys(ItVirtReg))
+      if (VRM->hasPhys(ItVirtReg)) {
         Matrix->unassign(*RC);
+        VRegsToAlloc.insert(RC->reg());
+      }
       MCRegister ItPhysReg = VirtRegToPhysReg[ItVirtReg];
       Matrix->assign(*RC, ItPhysReg);
+      VRegsToAlloc.erase(RC->reg());
     }
   }
 
@@ -2872,6 +2888,7 @@ bool RAGreedy::tryRecoloringCandidates(PQueue &RecoloringQueue,
                       << " succeeded with: " << printReg(PhysReg, TRI) << '\n');
 
     Matrix->assign(*LI, PhysReg);
+    VRegsToAlloc.erase(LI->reg());
     FixedRegisters.insert(LI->reg());
   }
   return true;
@@ -3175,6 +3192,7 @@ bool RAGreedy::spillInterferences(LiveInterval &VirtReg, MCRegister PhysReg,
     // Deallocate the interfering vreg by removing it from the union.
     // A LiveInterval instance may not be in a union during modification!
     Matrix->unassign(Spill);
+    VRegsToAlloc.insert(Spill.reg());
 
     // Spill the extracted interval.
     LiveRangeEdit LRE(&Spill, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
@@ -3250,7 +3268,13 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
       AllocationOrder::create(VirtReg.reg(), *VRM, RegClassInfo, Matrix);
 
   std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
-  if (isMaybeSuboptimal(filename) && overCostThreshold(filename) && EnableFallback && Round > Limit) {
+  if (UsePBQP && isMaybeSuboptimal(filename) && overCostThreshold(filename) && EnableFallback && Round > Limit) {
+    errs() << "FALLBACK to PBQP!!!\n";
+    (new RegAllocPBQP())->runOnMachineFunctionCustom(*MF, *VRM, *LIS, Loops, MBFI, &spiller(), VRegsToAlloc, EmptyIntervalVRegs);
+    MCRegister Reg;
+    Reg.setPBQP();
+    return Reg;
+  } else if (isMaybeSuboptimal(filename) && overCostThreshold(filename) && EnableFallback && Round > Limit) {
     errs() << "TEST\n";
     Fallback = true;
     // errs() << "NOW FALLBACK TO BASIC!\n";
@@ -3702,6 +3726,12 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   Limit = 0;
   Fallback = false;
   MaybeSuboptimal = false;
+  VRegsToAlloc.clear();
+  EmptyIntervalVRegs.clear();
+  isPBQP = false;
+  while (!Queue.empty()) {
+    Queue.pop();
+  }
 
   // maybeSuboptimal();
 
@@ -3710,7 +3740,8 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   allocatePhysRegs();
 }
 
-  tryHintsRecoloring();
+  if (!isPBQP)
+    tryHintsRecoloring();
 
   if (VerifyEnabled)
     MF->verify(this, "Before post optimization");
@@ -3729,7 +3760,8 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
 
   printCost(-1);
 
-  reportNumberOfSplillsReloads();
+  if (!isPBQP)
+    reportNumberOfSplillsReloads();
 
   releaseMemory();
   return true;

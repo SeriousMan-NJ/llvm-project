@@ -22,6 +22,7 @@ using MCPhysReg = uint16_t;
 class MCRegister {
   friend hash_code hash_value(const MCRegister &);
   unsigned Reg;
+  bool IsPBQP = false;
 
 public:
   constexpr MCRegister(unsigned Val = 0): Reg(Val) {}
@@ -72,6 +73,8 @@ public:
   }
 
   bool isValid() const { return Reg != NoRegister; }
+  bool isPBQP() const { return IsPBQP; }
+  void setPBQP() { IsPBQP = true; }
 
   /// Comparisons between register objects
   bool operator==(const MCRegister &Other) const { return Reg == Other.Reg; }
