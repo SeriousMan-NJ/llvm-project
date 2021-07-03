@@ -184,7 +184,7 @@ OnlyOverCostThreshold("only-over-cost-threshold",
 static cl::opt<unsigned>
 EvictMode("evict-mode",
           cl::desc("Eviction mode"),
-          cl::init(3), cl::Hidden);
+          cl::init(0), cl::Hidden);
 
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
