@@ -155,7 +155,7 @@ EnableFallback("enable-fallback",
 static cl::opt<bool>
 WriteStat("write-stat",
     cl::desc("Write stat"),
-    cl::init(false), cl::Hidden);
+    cl::init(true), cl::Hidden);
 
 static cl::opt<bool>
 AppendStat("append-stat",
@@ -1035,7 +1035,6 @@ bool RAGreedy::canEvictInterference(
 
       int a = Q.collectInterferingVRegs(5);
       if (EvictMode == 0) {
-        if (MaxCost.MaxWeight < 0) MaxCost.MaxWeight = VirtReg.weight();
         Cost.MaxWeight = std::max(Cost.MaxWeight, Intf->weight());
       } else if (EvictMode == 1) {
         if (MaxCost.MaxWeight < 0) MaxCost.MaxWeight = VirtReg.weight();
@@ -1234,7 +1233,7 @@ MCRegister RAGreedy::tryEvict(LiveInterval &VirtReg, AllocationOrder &Order,
   // hints, and only evict smaller spill weights.
   if (CostPerUseLimit < uint8_t(~0u)) {
     BestCost.BrokenHints = 0;
-    BestCost.MaxWeight = -1;
+    BestCost.MaxWeight = VirtReg.weight();
 
     // Check of any registers in RC are below CostPerUseLimit.
     const TargetRegisterClass *RC = MRI->getRegClass(VirtReg.reg());
