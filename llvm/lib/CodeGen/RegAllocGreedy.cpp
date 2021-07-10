@@ -192,6 +192,11 @@ UsePBQP("use-pbqp",
         cl::desc("Use PBQP"),
         cl::init(false), cl::Hidden);
 
+static cl::opt<bool>
+SkipSplitting("skip-splitting",
+              cl::desc("Skip Splitting"),
+              cl::init(false), cl::Hidden);
+
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
 
@@ -3196,6 +3201,7 @@ bool RAGreedy::spillInterferences(LiveInterval &VirtReg, MCRegister PhysReg,
     // Spill the extracted interval.
     LiveRangeEdit LRE(&Spill, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
     spiller().spill(LRE);
+    SpilledCost += VirtReg.cost();
   }
   return true;
 }
@@ -3273,7 +3279,7 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     MCRegister Reg;
     Reg.setPBQP();
     return Reg;
-  } else if (isMaybeSuboptimal(filename) && overCostThreshold(filename) && EnableFallback && Round > Limit) {
+  } else if (!SkipSplitting && isMaybeSuboptimal(filename) && overCostThreshold(filename) && EnableFallback && Round > Limit) {
     errs() << "TEST\n";
     Fallback = true;
     // errs() << "NOW FALLBACK TO BASIC!\n";
@@ -3387,16 +3393,17 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     return 0;
   }
 
-  if (Stage < RS_Spill) {
-    // Try splitting VirtReg or interferences.
-    unsigned NewVRegSizeBefore = NewVRegs.size();
-    Register PhysReg = trySplit(VirtReg, Order, NewVRegs, FixedRegisters);
-    if (PhysReg || (NewVRegs.size() - NewVRegSizeBefore)) {
-      // If VirtReg got split, the eviction info is no longer relevant.
-      LastEvicted.clearEvicteeInfo(VirtReg.reg());
-      return PhysReg;
+  if (!EnableFallback && Round > Limit && SkipSplitting)
+    if (Stage < RS_Spill) {
+      // Try splitting VirtReg or interferences.
+      unsigned NewVRegSizeBefore = NewVRegs.size();
+      Register PhysReg = trySplit(VirtReg, Order, NewVRegs, FixedRegisters);
+      if (PhysReg || (NewVRegs.size() - NewVRegSizeBefore)) {
+        // If VirtReg got split, the eviction info is no longer relevant.
+        LastEvicted.clearEvicteeInfo(VirtReg.reg());
+        return PhysReg;
+      }
     }
-  }
 
   // If we couldn't allocate a register from spilling, there is probably some
   // invalid inline assembly. The base class will report it.
@@ -3429,10 +3436,6 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     spiller().spill(LRE);
     setStage(NewVRegs.begin(), NewVRegs.end(), RS_Done);
     SpilledCost += VirtReg.cost();
-
-    // for (auto r : NewVRegs) {
-    //   LIS->getInterval(r).setSpillCost(0);
-    // }
 
     // Tell LiveDebugVariables about the new ranges. Ranges not being covered by
     // the new regs are kept in LDV (still mapping to the old register), until
