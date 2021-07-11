@@ -3393,7 +3393,9 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     return 0;
   }
 
-  if (!EnableFallback && Round > Limit && SkipSplitting)
+  if (EnableFallback && Round > Limit && SkipSplitting) {
+    errs() << "SKIP SPLITTING!\n";
+  } else {
     if (Stage < RS_Spill) {
       // Try splitting VirtReg or interferences.
       unsigned NewVRegSizeBefore = NewVRegs.size();
@@ -3404,6 +3406,7 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
         return PhysReg;
       }
     }
+  }
 
   // If we couldn't allocate a register from spilling, there is probably some
   // invalid inline assembly. The base class will report it.
