@@ -481,6 +481,9 @@ class RAGreedy : public MachineFunctionPass,
 
   float SpilledCost;
 
+  unsigned SplitCanCauseEvictionChain;
+  unsigned SplitCanCauseLocalSpill;
+
 public:
   RAGreedy();
 
@@ -1636,6 +1639,7 @@ bool RAGreedy::splitCanCauseEvictionChain(Register Evictee,
   if (splitArtifactWeight >= 0 && splitArtifactWeight < MaxWeight)
     return false;
 
+  SplitCanCauseEvictionChain++;
   return true;
 }
 
@@ -1667,6 +1671,7 @@ bool RAGreedy::splitCanCauseLocalSpill(unsigned VirtRegToSplit,
   // The local interval is not able to find non interferencing assignment
   // and not able to evict a less worthy interval, therfore, it can cause a
   // spill.
+  SplitCanCauseLocalSpill++;
   return true;
 }
 
@@ -3549,6 +3554,8 @@ void RAGreedy::writeStat() {
   f << MaybeSuboptimal << "\n";
   f << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
   f << MF->getName().str() << "\n";
+  f << SplitCanCauseEvictionChain << "\n";
+  f << SplitCanCauseLocalSpill << "\n";
   f.close();
 }
 
@@ -3737,6 +3744,8 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   while (!Queue.empty()) {
     Queue.pop();
   }
+  SplitCanCauseEvictionChain = 0;
+  SplitCanCauseLocalSpill = 0;
 
   // maybeSuboptimal();
 
