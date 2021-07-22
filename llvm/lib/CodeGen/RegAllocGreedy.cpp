@@ -71,6 +71,8 @@
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/Analysis/LoopIterator.h"
 #include "RegAllocPBQP.h"
 #include <algorithm>
 #include <cassert>
@@ -643,8 +645,16 @@ private:
   bool spillInterferences(LiveInterval &VirtReg, MCRegister PhysReg,
                           SmallVectorImpl<Register> &SplitVRegs);
 
+  typedef struct loopInfoCustom {
+    int num_innermost;
+    int num_small_innermost;
+    int num_innermost_inst;
+    int num_loop_inst;
+  } LoopInfoCustom;
+
   /// maybe suboptimal splitting
   void maybeSuboptimal();
+  void maybeSuboptimal(MachineLoop* L, LoopInfoCustom *I);
 };
 
 } // end anonymous namespace
@@ -3553,7 +3563,7 @@ void RAGreedy::writeStat() {
   f << calcPotentialSpillCosts() << "\n";
   f << ((MaybeSuboptimal && MinSpillCost < calcPotentialSpillCosts() * 0.91)
         || (MaybeSuboptimal2 && MinSpillCost < calcPotentialSpillCosts() * Hysteresis)
-        || (MaybeSuboptimal3 && MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 10)) << "\n";
+        || (MaybeSuboptimal3 && MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 100)) << "\n";
   f << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
   f << MF->getName().str() << "\n";
   f << SplitCanCauseEvictionChain << "\n";
@@ -3575,125 +3585,140 @@ void RAGreedy::appendStat() {
   OS.flush();
 }
 
+void RAGreedy::maybeSuboptimal(MachineLoop* L, LoopInfoCustom *I) {
+  bool isInnermost = L->isInnermost();
+  if (isInnermost) {
+    I->num_innermost += 1;
+  }
+  bool flag = true;
+  for (MachineBasicBlock *MBB : L->getBlocks()) {
+    unsigned inst = MBB->size();
+    if (isInnermost && Loops->getLoopFor(MBB) == L) {
+      if (inst > 15) {
+        flag = false;
+      }
+    }
+    if (!flag || !isInnermost) I->num_loop_inst += inst;
+    else I->num_innermost_inst += inst;
+  }
+  if (flag && isInnermost) I->num_small_innermost += 1;
+
+  for (MachineLoop *SubLoop : *L) {
+    maybeSuboptimal(SubLoop, I);
+  }
+}
+
 void RAGreedy::maybeSuboptimal() {
   std::string filename = "/home/ywshin/llvm-test-suite/maybe/" + std::to_string(getpid()) + ".txt";
   std::string f = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
   std::error_code EC;
   // raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
-  unsigned num_small_inner_loops = 0;
-  unsigned num_inner_loops = 0;
+
+  LoopInfoCustom I = {0, 0, 0, 0};
+
   bool loopExist = false;
   for (MachineLoop *L : *Loops) {
+    maybeSuboptimal(L, &I);
     loopExist = true;
-    int num_inst = 0;
-    int m = 0;
-    std::vector<Register> v;
-    // # Inner loop
-    if (L->isInnermost()) {
-      num_inner_loops++;
-      bool flag = true;
-      unsigned inst = 0;
-      for (MachineBasicBlock *MBB : L->getBlocks()) {
-        if (Loops->getLoopFor(MBB) == L) {
-          inst = MBB->size();
-          if (inst > 30) {
-            flag = false;
-            break;
-          }
-        }
-      }
-      if (flag) num_small_inner_loops++;
-    }
+    // int num_inst = 0;
+    // int m = 0;
+    // std::vector<Register> v;
 
-    for (MachineBasicBlock *MBB : L->getBlocks()) {
-      // Loop overall size
-      for (MachineInstr &MI : *MBB) {
-        num_inst++;
+    // for (MachineBasicBlock *MBB : L->getBlocks()) {
+    //   // Loop overall size
+    //   for (MachineInstr &MI : *MBB) {
+    //     num_inst++;
 
-        for (int i = 0; i < MI.getNumOperands(); i++) {
-          auto operand = MI.getOperand(i);
+    //     for (int i = 0; i < MI.getNumOperands(); i++) {
+    //       auto operand = MI.getOperand(i);
 
-          if (!operand.isReg())
-            continue;
+    //       if (!operand.isReg())
+    //         continue;
 
-          auto reg = operand.getReg();
+    //       auto reg = operand.getReg();
 
-          if (reg.isPhysical() || !reg.isVirtual() || !reg.isValid() || reg.isStack())
-            continue;
-          if (MRI->reg_nodbg_empty(reg))
-            continue;
+    //       if (reg.isPhysical() || !reg.isVirtual() || !reg.isValid() || reg.isStack())
+    //         continue;
+    //       if (MRI->reg_nodbg_empty(reg))
+    //         continue;
 
-          if(std::find(v.begin(), v.end(), reg) == v.end())
-            v.push_back(reg);
-        }
-      }
-      int n = 0;
+    //       if(std::find(v.begin(), v.end(), reg) == v.end())
+    //         v.push_back(reg);
+    //     }
+    //   }
+    //   int n = 0;
 
-      // Register pressure
-      for (auto r1 : v) {
-        auto &L1 = LIS->getInterval(r1);
-        if (L1.empty()) continue;
-        int c = 0;
-        for (auto r2 : v) {
-          if (r1 == r2) continue;
-          auto &L2 = LIS->getInterval(r2);
-          if (L2.empty()) continue;
-          if (L1.overlaps(L2)) {
-            c++;
-          }
-        }
-        if (c >= 10) {
-          n++;
-          m++;
-        }
-      }
+    //   // Register pressure
+    //   for (auto r1 : v) {
+    //     auto &L1 = LIS->getInterval(r1);
+    //     if (L1.empty()) continue;
+    //     int c = 0;
+    //     for (auto r2 : v) {
+    //       if (r1 == r2) continue;
+    //       auto &L2 = LIS->getInterval(r2);
+    //       if (L2.empty()) continue;
+    //       if (L1.overlaps(L2)) {
+    //         c++;
+    //       }
+    //     }
+    //     if (c >= 10) {
+    //       n++;
+    //       m++;
+    //     }
+    //   }
 
-      if (n > 0 && num_inst > 0) {
-        errs() << "SIZE:" << n << "," << m << "," << num_inst << "\n";
-        if (n > 20 && n / (float)num_inst > 0.2 && num_inst > 100 || n > 15 && n / (float)num_inst > 0.45 && num_inst > 35) {
-          errs() << "INST: " << num_inst << "\n";
-          errs() << "BINGO: " << filename << "\n";
-          MaybeSuboptimal = true;
-        }
-        if (WritePatSubopt) {
-          raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
-          OS << n << "\n";
-          OS << num_inst << "\n";
-          OS << MinSpillCost << "\n";
-          OS << calcPotentialSpillCosts() << "\n";
-          OS << f << "\n";
-          OS << "type 1\n";
-        }
-      }
-    }
-    if (m > 0 && num_inst > 0) {
-      if (m > 40 && m / (float)num_inst > 0.1 && num_inst > 160 || m > 100 && m / (float)num_inst > 3 && num_inst > 50) {
-        errs() << "INST: " << num_inst << "\n";
-        errs() << "BINGO: " << filename << "\n";
-        MaybeSuboptimal2 = true;
-      }
-      if (WritePatSubopt) {
-        raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
-        OS << m << "\n";
-        OS << num_inst << "\n";
-        OS << MinSpillCost << "\n";
-        OS << calcPotentialSpillCosts() << "\n";
-        OS << f << "\n";
-        OS << "type 2\n";
-      }
-    }
+    //   if (n > 0 && num_inst > 0) {
+    //     errs() << "SIZE:" << n << "," << m << "," << num_inst << "\n";
+    //     if (n > 20 && n / (float)num_inst > 0.2 && num_inst > 100 || n > 15 && n / (float)num_inst > 0.45 && num_inst > 35) {
+    //       errs() << "INST: " << num_inst << "\n";
+    //       errs() << "BINGO: " << filename << "\n";
+    //       MaybeSuboptimal = true;
+    //     }
+    //     if (WritePatSubopt) {
+    //       raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
+    //       OS << n << "\n";
+    //       OS << num_inst << "\n";
+    //       OS << MinSpillCost << "\n";
+    //       OS << calcPotentialSpillCosts() << "\n";
+    //       OS << f << "\n";
+    //       OS << "type 1\n";
+    //     }
+    //   }
+    // }
+    // if (m > 0 && num_inst > 0) {
+    //   if (m > 40 && m / (float)num_inst > 0.1 && num_inst > 160 || m > 100 && m / (float)num_inst > 3 && num_inst > 50) {
+    //     errs() << "INST: " << num_inst << "\n";
+    //     errs() << "BINGO: " << filename << "\n";
+    //     MaybeSuboptimal2 = true;
+    //   }
+    //   if (WritePatSubopt) {
+    //     raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
+    //     OS << m << "\n";
+    //     OS << num_inst << "\n";
+    //     OS << MinSpillCost << "\n";
+    //     OS << calcPotentialSpillCosts() << "\n";
+    //     OS << f << "\n";
+    //     OS << "type 2\n";
+    //   }
+    // }
   }
 
-  if (!loopExist) {
+  // if (!loopExist) {
     MaybeSuboptimal3 = true;
-  }
+  // }
 
   // Exclude when majority of the loops are small
-  // if (!Loops->empty() && num_inner_loops > 5 && num_small_inner_loops / num_inner_loops > 0.5) {
-  //   MaybeSuboptimal = false;
-  //   MaybeSuboptimal2 = false;
-  //   MaybeSuboptimal3 = false;
-  // }
+  errs() << "INNER LOOPS:" << I.num_small_innermost << "," << I.num_innermost << " | " << I.num_loop_inst << "," << I.num_innermost_inst << "\n";
+
+  if (I.num_innermost_inst == 0) return;
+
+  if (( (float)I.num_small_innermost / I.num_innermost > 0.5 && I.num_loop_inst < 3.5 * I.num_innermost_inst ) ||
+      ( (float)I.num_small_innermost / I.num_innermost > 0.4 && I.num_loop_inst < 3.8 * I.num_innermost_inst ) ||
+      ( I.num_innermost > 30 && (float)I.num_small_innermost / I.num_innermost > 0.85 )) {
+    MaybeSuboptimal = false;
+    MaybeSuboptimal2 = false;
+    MaybeSuboptimal3 = false;
+  }
   // if (WritePatSubopt) {
   //   raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
   //   OS << num_small_inner_loops << "\n";
