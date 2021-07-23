@@ -650,6 +650,8 @@ private:
     int num_small_innermost;
     int num_innermost_inst;
     int num_loop_inst;
+    bool only_small;
+    int small_loop_max_depth;
   } LoopInfoCustom;
 
   /// maybe suboptimal splitting
@@ -3598,10 +3600,12 @@ void RAGreedy::maybeSuboptimal(MachineLoop* L, LoopInfoCustom *I) {
         flag = false;
       }
     }
+    if (inst > 10) I->only_small = false;
     if (!flag || !isInnermost) I->num_loop_inst += inst;
     else I->num_innermost_inst += inst;
   }
   if (flag && isInnermost) I->num_small_innermost += 1;
+  if (flag && isInnermost && I->small_loop_max_depth < L->getLoopDepth()) I->small_loop_max_depth = L->getLoopDepth();
 
   for (MachineLoop *SubLoop : *L) {
     maybeSuboptimal(SubLoop, I);
@@ -3614,7 +3618,7 @@ void RAGreedy::maybeSuboptimal() {
   std::error_code EC;
   // raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
 
-  LoopInfoCustom I = {0, 0, 0, 0};
+  LoopInfoCustom I = {0, 0, 0, 0, true, 0};
 
   bool loopExist = false;
   for (MachineLoop *L : *Loops) {
@@ -3712,7 +3716,8 @@ void RAGreedy::maybeSuboptimal() {
 
   if (I.num_innermost_inst == 0) return;
 
-  if (( (float)I.num_small_innermost / I.num_innermost > 0.5 && I.num_loop_inst < 3.5 * I.num_innermost_inst ) ||
+  if (( I.only_small ) ||
+      ( (float)I.num_small_innermost / I.num_innermost > 0.5 && I.num_loop_inst < 3.5 * I.num_innermost_inst ) ||
       ( (float)I.num_small_innermost / I.num_innermost > 0.4 && I.num_loop_inst < 3.8 * I.num_innermost_inst ) ||
       ( I.num_innermost > 30 && (float)I.num_small_innermost / I.num_innermost > 0.85 )) {
     MaybeSuboptimal = false;
