@@ -3565,7 +3565,7 @@ void RAGreedy::writeStat() {
   f << calcPotentialSpillCosts() << "\n";
   f << ((MaybeSuboptimal && MinSpillCost < calcPotentialSpillCosts() * 0.91)
         || (MaybeSuboptimal2 && MinSpillCost < calcPotentialSpillCosts() * Hysteresis)
-        || (MaybeSuboptimal3 && MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 100)) << "\n";
+        || (MaybeSuboptimal3 && MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 50)) << "\n";
   f << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
   f << MF->getName().str() << "\n";
   f << SplitCanCauseEvictionChain << "\n";
