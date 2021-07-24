@@ -3557,6 +3557,11 @@ float RAGreedy::calcPotentialSpillCosts() {
 void RAGreedy::writeStat() {
   std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
   std::ofstream f(filename);
+
+  if (calcPotentialSpillCosts() < 100 && MinSpillCost >= calcPotentialSpillCosts() * 0.80) {
+    MaybeSuboptimal3 = false;
+  }
+
   f << MinRound << "\n";
   f << Round << "\n";
   f << MinSpillCost << "\n";
