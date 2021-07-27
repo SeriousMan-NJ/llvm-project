@@ -199,6 +199,11 @@ SkipSplitting("skip-splitting",
               cl::desc("Skip Splitting"),
               cl::init(false), cl::Hidden);
 
+static cl::opt<bool>
+CheckSplit("check-split",
+           cl::desc("Skip Splitting"),
+           cl::init(false), cl::Hidden);
+
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
 
@@ -240,6 +245,8 @@ class RAGreedy : public MachineFunctionPass,
   std::map<LiveInterval*, float> SpillCostMap;
   unsigned NextCascade;
   std::unique_ptr<VirtRegAuxInfo> VRAI;
+
+  bool checkSplit;
 
   // // Live ranges pass through a number of stages as we try to allocate them.
   // // Some of the stages may also create new live ranges:
@@ -319,6 +326,9 @@ class RAGreedy : public MachineFunctionPass,
   }
 
   void setStage(const LiveInterval &VirtReg, LiveRangeStage Stage) {
+    if (Stage == RS_Split || Stage == RS_Split2) {
+      checkSplit = true;
+    }
     ExtraRegInfo.resize(MRI->getNumVirtRegs());
     ExtraRegInfo[VirtReg.reg()].Stage = Stage;
   }
@@ -329,6 +339,9 @@ class RAGreedy : public MachineFunctionPass,
 
   template<typename Iterator>
   void setStage(Iterator Begin, Iterator End, LiveRangeStage NewStage) {
+    if (NewStage == RS_Split || NewStage == RS_Split2) {
+      checkSplit = true;
+    }
     ExtraRegInfo.resize(MRI->getNumVirtRegs());
     for (;Begin != End; ++Begin) {
       Register Reg = *Begin;
@@ -657,6 +670,7 @@ private:
   /// maybe suboptimal splitting
   void maybeSuboptimal();
   void maybeSuboptimal(MachineLoop* L, LoopInfoCustom *I);
+  void doesSplitExist();
 };
 
 } // end anonymous namespace
@@ -3741,6 +3755,14 @@ void RAGreedy::maybeSuboptimal() {
   // OS.flush();
 }
 
+void RAGreedy::doesSplitExist() {
+  std::string filename = "/home/ywshin/llvm-test-suite/split/" + std::to_string(getpid()) + ".txt";
+  std::error_code EC;
+  raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
+  OS << checkSplit << "\n";
+  OS.flush();
+}
+
 bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   // NamedRegionTimer T("total", "Total", TimerGroupName, TimerGroupDescription, true);
   LLVM_DEBUG(dbgs() << "********** GREEDY REGISTER ALLOCATION **********\n"
@@ -3826,6 +3848,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   }
   SplitCanCauseEvictionChain = 0;
   SplitCanCauseLocalSpill = 0;
+  checkSplit = false;
 
   maybeSuboptimal();
 
@@ -3856,6 +3879,9 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
 
   if (!isPBQP)
     reportNumberOfSplillsReloads();
+
+  if (CheckSplit)
+    doesSplitExist();
 
   releaseMemory();
   return true;
