@@ -204,6 +204,11 @@ CheckSplit("check-split",
            cl::desc("Skip Splitting"),
            cl::init(false), cl::Hidden);
 
+static cl::opt<bool>
+WriteBehaviourLevel("write-behaviour-level",
+                   cl::desc("Write behaviour level"),
+                   cl::init(false), cl::Hidden);
+
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
 
@@ -247,6 +252,7 @@ class RAGreedy : public MachineFunctionPass,
   std::unique_ptr<VirtRegAuxInfo> VRAI;
 
   bool checkSplit;
+  unsigned behaviourLevel;
 
   // // Live ranges pass through a number of stages as we try to allocate them.
   // // Some of the stages may also create new live ranges:
@@ -328,6 +334,7 @@ class RAGreedy : public MachineFunctionPass,
   void setStage(const LiveInterval &VirtReg, LiveRangeStage Stage) {
     if (Stage == RS_Split || Stage == RS_Split2) {
       checkSplit = true;
+      if (behaviourLevel < 1) behaviourLevel = 1;
     }
     ExtraRegInfo.resize(MRI->getNumVirtRegs());
     ExtraRegInfo[VirtReg.reg()].Stage = Stage;
@@ -341,6 +348,7 @@ class RAGreedy : public MachineFunctionPass,
   void setStage(Iterator Begin, Iterator End, LiveRangeStage NewStage) {
     if (NewStage == RS_Split || NewStage == RS_Split2) {
       checkSplit = true;
+      if (behaviourLevel < 1) behaviourLevel = 1;
     }
     ExtraRegInfo.resize(MRI->getNumVirtRegs());
     for (;Begin != End; ++Begin) {
@@ -671,6 +679,7 @@ private:
   void maybeSuboptimal();
   void maybeSuboptimal(MachineLoop* L, LoopInfoCustom *I);
   void doesSplitExist();
+  void setBehaviourLevel();
 };
 
 } // end anonymous namespace
@@ -3233,6 +3242,7 @@ bool RAGreedy::spillInterferences(LiveInterval &VirtReg, MCRegister PhysReg,
     LiveRangeEdit LRE(&Spill, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
     spiller().spill(LRE);
     SpilledCost += VirtReg.cost();
+    if (behaviourLevel < 2) behaviourLevel = 2;
   }
   return true;
 }
@@ -3354,6 +3364,7 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
     spiller().spill(LRE);
     SpilledCost += VirtReg.cost();
+    if (behaviourLevel < 2) behaviourLevel = 2;
 
     // The live virtual register requesting allocation was spilled, so tell
     // the caller not to allocate anything during this round.
@@ -3470,6 +3481,7 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     spiller().spill(LRE);
     setStage(NewVRegs.begin(), NewVRegs.end(), RS_Done);
     SpilledCost += VirtReg.cost();
+    if (behaviourLevel < 2) behaviourLevel = 2;
 
     // Tell LiveDebugVariables about the new ranges. Ranges not being covered by
     // the new regs are kept in LDV (still mapping to the old register), until
@@ -3763,6 +3775,26 @@ void RAGreedy::doesSplitExist() {
   OS.flush();
 }
 
+void RAGreedy::setBehaviourLevel() {
+  std::string filename = "/home/ywshin/llvm-test-suite/level/" + std::to_string(getpid()) + ".txt";
+  std::error_code EC;
+  raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
+
+  if (MinRound < Round) behaviourLevel = 3;
+  if (MinSpillCost < calcPotentialSpillCosts() * 0.90) behaviourLevel = 4;
+
+  bool pattern = MaybeSuboptimal3;
+  if (calcPotentialSpillCosts() < 100 && MinSpillCost >= calcPotentialSpillCosts() * 0.80) {
+    pattern = false;
+  }
+  pattern = pattern && MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 50;
+
+  if (pattern) behaviourLevel = 5;
+
+  OS << behaviourLevel << "\n";
+  OS.flush();
+}
+
 bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   // NamedRegionTimer T("total", "Total", TimerGroupName, TimerGroupDescription, true);
   LLVM_DEBUG(dbgs() << "********** GREEDY REGISTER ALLOCATION **********\n"
@@ -3849,6 +3881,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   SplitCanCauseEvictionChain = 0;
   SplitCanCauseLocalSpill = 0;
   checkSplit = false;
+  behaviourLevel = 0;
 
   maybeSuboptimal();
 
@@ -3882,6 +3915,9 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
 
   if (CheckSplit)
     doesSplitExist();
+
+  if (WriteBehaviourLevel)
+    setBehaviourLevel();
 
   releaseMemory();
   return true;
