@@ -33,6 +33,8 @@
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
+#include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/InitializePasses.h"
@@ -44,9 +46,11 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/IR/Module.h"
 #include <cassert>
 #include <tuple>
 #include <vector>
+#include <fstream>
 
 using namespace llvm;
 
@@ -72,11 +76,17 @@ namespace {
     RegAllocFast() : MachineFunctionPass(ID), StackSlotForVirtReg(-1) {}
 
   private:
+    // context
+    MachineFunction *MF;
+
     MachineFrameInfo *MFI;
     MachineRegisterInfo *MRI;
     const TargetRegisterInfo *TRI;
     const TargetInstrInfo *TII;
     RegisterClassInfo RegClassInfo;
+    std::string Filename;
+    MachineBlockFrequencyInfo *MBFI;
+    MachineLoopInfo *Loops;
 
     /// Basic block currently being allocated.
     MachineBasicBlock *MBB;
@@ -188,11 +198,58 @@ namespace {
       spillImpossible = ~0u
     };
 
+    /// RA statistic to remark.
+    struct RAStats {
+      unsigned Reloads = 0;
+      unsigned FoldedReloads = 0;
+      unsigned ZeroCostFoldedReloads = 0;
+      unsigned Spills = 0;
+      unsigned FoldedSpills = 0;
+      unsigned Copies = 0;
+      float ReloadsCost = 0.0f;
+      float FoldedReloadsCost = 0.0f;
+      float SpillsCost = 0.0f;
+      float FoldedSpillsCost = 0.0f;
+      float CopiesCost = 0.0f;
+
+      bool isEmpty() {
+        return !(Reloads || FoldedReloads || Spills || FoldedSpills ||
+                ZeroCostFoldedReloads || Copies);
+      }
+
+      void add(RAStats other) {
+        Reloads += other.Reloads;
+        FoldedReloads += other.FoldedReloads;
+        ZeroCostFoldedReloads += other.ZeroCostFoldedReloads;
+        Spills += other.Spills;
+        FoldedSpills += other.FoldedSpills;
+        Copies += other.Copies;
+        ReloadsCost += other.ReloadsCost;
+        FoldedReloadsCost += other.FoldedReloadsCost;
+        SpillsCost += other.SpillsCost;
+        FoldedSpillsCost += other.FoldedSpillsCost;
+        CopiesCost += other.CopiesCost;
+      }
+    };
+
+    /// Compute statistic for a basic block.
+    RAStats computeStats(MachineBasicBlock &MBB);
+
+    /// Compute and report statistic through a remark.
+    RAStats recordStats(MachineLoop *L);
+
+    /// Report the statistic for each loop.
+    void recordStats();
+
   public:
     StringRef getPassName() const override { return "Fast Register Allocator"; }
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
+      AU.addRequired<MachineBlockFrequencyInfo>();
+      AU.addPreserved<MachineBlockFrequencyInfo>();
+      AU.addRequired<MachineLoopInfo>();
+      AU.addPreserved<MachineLoopInfo>();
       MachineFunctionPass::getAnalysisUsage(AU);
     }
 
@@ -1487,16 +1544,127 @@ void RegAllocFast::allocateBasicBlock(MachineBasicBlock &MBB) {
   LLVM_DEBUG(MBB.dump());
 }
 
-bool RegAllocFast::runOnMachineFunction(MachineFunction &MF) {
+RegAllocFast::RAStats RegAllocFast::computeStats(MachineBasicBlock &MBB) {
+  RAStats Stats;
+  const MachineFrameInfo &MFI = MF->getFrameInfo();
+  int FI;
+
+  auto isSpillSlotAccess = [&MFI](const MachineMemOperand *A) {
+    return MFI.isSpillSlotObjectIndex(cast<FixedStackPseudoSourceValue>(
+        A->getPseudoValue())->getFrameIndex());
+  };
+  auto isPatchpointInstr = [](const MachineInstr &MI) {
+    return MI.getOpcode() == TargetOpcode::PATCHPOINT ||
+           MI.getOpcode() == TargetOpcode::STACKMAP ||
+           MI.getOpcode() == TargetOpcode::STATEPOINT;
+  };
+  for (MachineInstr &MI : MBB) {
+    if (MI.isCopy()) {
+      MachineOperand &Dest = MI.getOperand(0);
+      MachineOperand &Src = MI.getOperand(1);
+      if (Dest.isReg() && Src.isReg() && Dest.getReg().isVirtual() &&
+          Src.getReg().isVirtual())
+        ++Stats.Copies;
+      continue;
+    }
+
+    SmallVector<const MachineMemOperand *, 2> Accesses;
+    if (TII->isLoadFromStackSlot(MI, FI) && MFI.isSpillSlotObjectIndex(FI)) {
+      ++Stats.Reloads;
+      continue;
+    }
+    if (TII->isStoreToStackSlot(MI, FI) && MFI.isSpillSlotObjectIndex(FI)) {
+      ++Stats.Spills;
+      continue;
+    }
+    if (TII->hasLoadFromStackSlot(MI, Accesses) &&
+        llvm::any_of(Accesses, isSpillSlotAccess)) {
+      if (!isPatchpointInstr(MI)) {
+        Stats.FoldedReloads += Accesses.size();
+        continue;
+      }
+      // For statepoint there may be folded and zero cost folded stack reloads.
+      std::pair<unsigned, unsigned> NonZeroCostRange =
+          TII->getPatchpointUnfoldableRange(MI);
+      SmallSet<unsigned, 16> FoldedReloads;
+      SmallSet<unsigned, 16> ZeroCostFoldedReloads;
+      for (unsigned Idx = 0, E = MI.getNumOperands(); Idx < E; ++Idx) {
+        MachineOperand &MO = MI.getOperand(Idx);
+        if (!MO.isFI() || !MFI.isSpillSlotObjectIndex(MO.getIndex()))
+          continue;
+        if (Idx >= NonZeroCostRange.first && Idx < NonZeroCostRange.second)
+          FoldedReloads.insert(MO.getIndex());
+        else
+          ZeroCostFoldedReloads.insert(MO.getIndex());
+      }
+      // If stack slot is used in folded reload it is not zero cost then.
+      for (unsigned Slot : FoldedReloads)
+        ZeroCostFoldedReloads.erase(Slot);
+      Stats.FoldedReloads += FoldedReloads.size();
+      Stats.ZeroCostFoldedReloads += ZeroCostFoldedReloads.size();
+      continue;
+    }
+    Accesses.clear();
+    if (TII->hasStoreToStackSlot(MI, Accesses) &&
+        llvm::any_of(Accesses, isSpillSlotAccess)) {
+      Stats.FoldedSpills += Accesses.size();
+    }
+  }
+  // Set cost of collected statistic by multiplication to relative frequency of
+  // this basic block.
+  float RelFreq = MBFI->getBlockFreqRelativeToEntryBlock(&MBB);
+  Stats.ReloadsCost = RelFreq * Stats.Reloads;
+  Stats.FoldedReloadsCost = RelFreq * Stats.FoldedReloads;
+  Stats.SpillsCost = RelFreq * Stats.Spills;
+  Stats.FoldedSpillsCost = RelFreq * Stats.FoldedSpills;
+  Stats.CopiesCost = RelFreq * Stats.Copies;
+  return Stats;
+}
+
+RegAllocFast::RAStats RegAllocFast::recordStats(MachineLoop *L) {
+  RAStats Stats;
+
+  // Sum up the spill and reloads in subloops.
+  for (MachineLoop *SubLoop : *L)
+    Stats.add(recordStats(SubLoop));
+
+  for (MachineBasicBlock *MBB : L->getBlocks())
+    // Handle blocks that were not included in subloops.
+    if (Loops->getLoopFor(MBB) == L)
+      Stats.add(computeStats(*MBB));
+
+  return Stats;
+}
+
+void RegAllocFast::recordStats() {
+  RAStats Stats;
+  for (MachineLoop *L : *Loops)
+    Stats.add(recordStats(L));
+  // Process non-loop blocks.
+  for (MachineBasicBlock &MBB : *MF)
+    if (!Loops->getLoopFor(&MBB))
+      Stats.add(computeStats(MBB));
+
+  std::ofstream f(Filename);
+  f << Stats.ReloadsCost + Stats.FoldedReloadsCost + Stats.SpillsCost + Stats.FoldedSpillsCost << "\n";
+  f << Stats.CopiesCost << "\n";
+  f.close();
+}
+
+bool RegAllocFast::runOnMachineFunction(MachineFunction &mf) {
   LLVM_DEBUG(dbgs() << "********** FAST REGISTER ALLOCATION **********\n"
-                    << "********** Function: " << MF.getName() << '\n');
-  MRI = &MF.getRegInfo();
-  const TargetSubtargetInfo &STI = MF.getSubtarget();
+                    << "********** Function: " << mf.getName() << '\n');
+  MF = &mf;
+
+  MRI = &(MF->getRegInfo());
+  const TargetSubtargetInfo &STI = MF->getSubtarget();
   TRI = STI.getRegisterInfo();
   TII = STI.getInstrInfo();
-  MFI = &MF.getFrameInfo();
-  MRI->freezeReservedRegs(MF);
-  RegClassInfo.runOnMachineFunction(MF);
+  MFI = &(MF->getFrameInfo());
+  MBFI = &getAnalysis<MachineBlockFrequencyInfo>();
+  Loops = &getAnalysis<MachineLoopInfo>();
+  MRI->freezeReservedRegs(*MF);
+  RegClassInfo.runOnMachineFunction(*MF);
   unsigned NumRegUnits = TRI->getNumRegUnits();
   UsedInInstr.clear();
   UsedInInstr.setUniverse(NumRegUnits);
@@ -1511,8 +1679,10 @@ bool RegAllocFast::runOnMachineFunction(MachineFunction &MF) {
   MayLiveAcrossBlocks.clear();
   MayLiveAcrossBlocks.resize(NumVirtRegs);
 
+  Filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".fast.txt";
+
   // Loop over all of the basic blocks, eliminating virtual register references
-  for (MachineBasicBlock &MBB : MF)
+  for (MachineBasicBlock &MBB : *MF)
     allocateBasicBlock(MBB);
 
   // All machine operands and other references to virtual registers have been
@@ -1521,6 +1691,9 @@ bool RegAllocFast::runOnMachineFunction(MachineFunction &MF) {
 
   StackSlotForVirtReg.clear();
   LiveDbgValueMap.clear();
+
+  recordStats();
+
   return true;
 }
 

@@ -62,6 +62,8 @@
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/Config/llvm-config.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -86,6 +88,7 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include <fstream>
 
 using namespace llvm;
 
@@ -146,11 +149,22 @@ public:
   }
 
 private:
+  // context
+  MachineFunction *MF;
+
   using RegSet = std::set<Register>;
 
   char *customPassID;
 
   RegSet VRegsToAlloc, EmptyIntervalVRegs;
+  std::string Filename;
+
+  // Shortcuts to some useful interface.
+  const TargetInstrInfo *TII;
+
+  // analyses
+  MachineBlockFrequencyInfo *MBFI;
+  MachineLoopInfo *Loops;
 
   /// Inst which is a def of an original reg and whose defs are already all
   /// dead after remat is saved in DeadRemats. The deletion of such inst is
@@ -182,6 +196,49 @@ private:
                      VirtRegMap &VRM) const;
 
   void postOptimization(Spiller &VRegSpiller, LiveIntervals &LIS);
+
+  /// RA statistic to remark.
+  struct RAStats {
+    unsigned Reloads = 0;
+    unsigned FoldedReloads = 0;
+    unsigned ZeroCostFoldedReloads = 0;
+    unsigned Spills = 0;
+    unsigned FoldedSpills = 0;
+    unsigned Copies = 0;
+    float ReloadsCost = 0.0f;
+    float FoldedReloadsCost = 0.0f;
+    float SpillsCost = 0.0f;
+    float FoldedSpillsCost = 0.0f;
+    float CopiesCost = 0.0f;
+
+    bool isEmpty() {
+      return !(Reloads || FoldedReloads || Spills || FoldedSpills ||
+               ZeroCostFoldedReloads || Copies);
+    }
+
+    void add(RAStats other) {
+      Reloads += other.Reloads;
+      FoldedReloads += other.FoldedReloads;
+      ZeroCostFoldedReloads += other.ZeroCostFoldedReloads;
+      Spills += other.Spills;
+      FoldedSpills += other.FoldedSpills;
+      Copies += other.Copies;
+      ReloadsCost += other.ReloadsCost;
+      FoldedReloadsCost += other.FoldedReloadsCost;
+      SpillsCost += other.SpillsCost;
+      FoldedSpillsCost += other.FoldedSpillsCost;
+      CopiesCost += other.CopiesCost;
+    }
+  };
+
+  /// Compute statistic for a basic block.
+  RAStats computeStats(MachineBasicBlock &MBB);
+
+  /// Compute and report statistic through a remark.
+  RAStats recordStats(MachineLoop *L);
+
+  /// Report the statistic for each loop.
+  void recordStats();
 };
 
 char RegAllocPBQP::ID = 0;
@@ -793,21 +850,133 @@ void RegAllocPBQP::postOptimization(Spiller &VRegSpiller, LiveIntervals &LIS) {
   DeadRemats.clear();
 }
 
-bool RegAllocPBQP::runOnMachineFunction(MachineFunction &MF) {
+RegAllocPBQP::RAStats RegAllocPBQP::computeStats(MachineBasicBlock &MBB) {
+  RAStats Stats;
+  const MachineFrameInfo &MFI = MF->getFrameInfo();
+  int FI;
+
+  auto isSpillSlotAccess = [&MFI](const MachineMemOperand *A) {
+    return MFI.isSpillSlotObjectIndex(cast<FixedStackPseudoSourceValue>(
+        A->getPseudoValue())->getFrameIndex());
+  };
+  auto isPatchpointInstr = [](const MachineInstr &MI) {
+    return MI.getOpcode() == TargetOpcode::PATCHPOINT ||
+           MI.getOpcode() == TargetOpcode::STACKMAP ||
+           MI.getOpcode() == TargetOpcode::STATEPOINT;
+  };
+  for (MachineInstr &MI : MBB) {
+    if (MI.isCopy()) {
+      MachineOperand &Dest = MI.getOperand(0);
+      MachineOperand &Src = MI.getOperand(1);
+      if (Dest.isReg() && Src.isReg() && Dest.getReg().isVirtual() &&
+          Src.getReg().isVirtual())
+        ++Stats.Copies;
+      continue;
+    }
+
+    SmallVector<const MachineMemOperand *, 2> Accesses;
+    if (TII->isLoadFromStackSlot(MI, FI) && MFI.isSpillSlotObjectIndex(FI)) {
+      ++Stats.Reloads;
+      continue;
+    }
+    if (TII->isStoreToStackSlot(MI, FI) && MFI.isSpillSlotObjectIndex(FI)) {
+      ++Stats.Spills;
+      continue;
+    }
+    if (TII->hasLoadFromStackSlot(MI, Accesses) &&
+        llvm::any_of(Accesses, isSpillSlotAccess)) {
+      if (!isPatchpointInstr(MI)) {
+        Stats.FoldedReloads += Accesses.size();
+        continue;
+      }
+      // For statepoint there may be folded and zero cost folded stack reloads.
+      std::pair<unsigned, unsigned> NonZeroCostRange =
+          TII->getPatchpointUnfoldableRange(MI);
+      SmallSet<unsigned, 16> FoldedReloads;
+      SmallSet<unsigned, 16> ZeroCostFoldedReloads;
+      for (unsigned Idx = 0, E = MI.getNumOperands(); Idx < E; ++Idx) {
+        MachineOperand &MO = MI.getOperand(Idx);
+        if (!MO.isFI() || !MFI.isSpillSlotObjectIndex(MO.getIndex()))
+          continue;
+        if (Idx >= NonZeroCostRange.first && Idx < NonZeroCostRange.second)
+          FoldedReloads.insert(MO.getIndex());
+        else
+          ZeroCostFoldedReloads.insert(MO.getIndex());
+      }
+      // If stack slot is used in folded reload it is not zero cost then.
+      for (unsigned Slot : FoldedReloads)
+        ZeroCostFoldedReloads.erase(Slot);
+      Stats.FoldedReloads += FoldedReloads.size();
+      Stats.ZeroCostFoldedReloads += ZeroCostFoldedReloads.size();
+      continue;
+    }
+    Accesses.clear();
+    if (TII->hasStoreToStackSlot(MI, Accesses) &&
+        llvm::any_of(Accesses, isSpillSlotAccess)) {
+      Stats.FoldedSpills += Accesses.size();
+    }
+  }
+  // Set cost of collected statistic by multiplication to relative frequency of
+  // this basic block.
+  float RelFreq = MBFI->getBlockFreqRelativeToEntryBlock(&MBB);
+  Stats.ReloadsCost = RelFreq * Stats.Reloads;
+  Stats.FoldedReloadsCost = RelFreq * Stats.FoldedReloads;
+  Stats.SpillsCost = RelFreq * Stats.Spills;
+  Stats.FoldedSpillsCost = RelFreq * Stats.FoldedSpills;
+  Stats.CopiesCost = RelFreq * Stats.Copies;
+  return Stats;
+}
+
+RegAllocPBQP::RAStats RegAllocPBQP::recordStats(MachineLoop *L) {
+  RAStats Stats;
+
+  // Sum up the spill and reloads in subloops.
+  for (MachineLoop *SubLoop : *L)
+    Stats.add(recordStats(SubLoop));
+
+  for (MachineBasicBlock *MBB : L->getBlocks())
+    // Handle blocks that were not included in subloops.
+    if (Loops->getLoopFor(MBB) == L)
+      Stats.add(computeStats(*MBB));
+
+  return Stats;
+}
+
+void RegAllocPBQP::recordStats() {
+  RAStats Stats;
+  for (MachineLoop *L : *Loops)
+    Stats.add(recordStats(L));
+  // Process non-loop blocks.
+  for (MachineBasicBlock &MBB : *MF)
+    if (!Loops->getLoopFor(&MBB))
+      Stats.add(computeStats(MBB));
+
+  std::ofstream f(Filename);
+  f << Stats.ReloadsCost + Stats.FoldedReloadsCost + Stats.SpillsCost + Stats.FoldedSpillsCost << "\n";
+  f << Stats.CopiesCost << "\n";
+  f.close();
+}
+
+bool RegAllocPBQP::runOnMachineFunction(MachineFunction &mf) {
+  MF = &mf;
+
+  TII = MF->getSubtarget().getInstrInfo();
   LiveIntervals &LIS = getAnalysis<LiveIntervals>();
-  MachineBlockFrequencyInfo &MBFI =
-    getAnalysis<MachineBlockFrequencyInfo>();
+  MBFI = &getAnalysis<MachineBlockFrequencyInfo>();
+  Loops = &getAnalysis<MachineLoopInfo>();
 
   VirtRegMap &VRM = getAnalysis<VirtRegMap>();
 
-  PBQPVirtRegAuxInfo VRAI(MF, LIS, VRM, getAnalysis<MachineLoopInfo>(), MBFI);
+  PBQPVirtRegAuxInfo VRAI(*MF, LIS, VRM, getAnalysis<MachineLoopInfo>(), *MBFI);
   VRAI.calculateSpillWeightsAndHints();
 
-  std::unique_ptr<Spiller> VRegSpiller(createInlineSpiller(*this, MF, VRM));
+  std::unique_ptr<Spiller> VRegSpiller(createInlineSpiller(*this, *MF, VRM));
 
-  MF.getRegInfo().freezeReservedRegs(MF);
+  MF->getRegInfo().freezeReservedRegs(*MF);
 
-  LLVM_DEBUG(dbgs() << "PBQP Register Allocating for " << MF.getName() << "\n");
+  Filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".pbqp.txt";
+
+  LLVM_DEBUG(dbgs() << "PBQP Register Allocating for " << MF->getName() << "\n");
 
   // Allocator main loop:
   //
@@ -819,17 +988,17 @@ bool RegAllocPBQP::runOnMachineFunction(MachineFunction &MF) {
   // This process is continued till no more spills are generated.
 
   // Find the vreg intervals in need of allocation.
-  findVRegIntervalsToAlloc(MF, LIS);
+  findVRegIntervalsToAlloc(*MF, LIS);
 
 #ifndef NDEBUG
-  const Function &F = MF.getFunction();
+  const Function &F = MF->getFunction();
   std::string FullyQualifiedName =
     F.getParent()->getModuleIdentifier() + "." + F.getName().str();
 #endif
 
   // If there are non-empty intervals allocate them using pbqp.
   if (!VRegsToAlloc.empty()) {
-    const TargetSubtargetInfo &Subtarget = MF.getSubtarget();
+    const TargetSubtargetInfo &Subtarget = MF->getSubtarget();
     std::unique_ptr<PBQPRAConstraintList> ConstraintsRoot =
       std::make_unique<PBQPRAConstraintList>();
     ConstraintsRoot->addConstraint(std::make_unique<SpillCosts>());
@@ -844,7 +1013,7 @@ bool RegAllocPBQP::runOnMachineFunction(MachineFunction &MF) {
     while (!PBQPAllocComplete) {
       LLVM_DEBUG(dbgs() << "  PBQP Regalloc round " << Round << ":\n");
 
-      PBQPRAGraph G(PBQPRAGraph::GraphMetadata(MF, LIS, MBFI));
+      PBQPRAGraph G(PBQPRAGraph::GraphMetadata(*MF, LIS, *MBFI));
       initializeGraph(G, VRM, *VRegSpiller);
       ConstraintsRoot->apply(G);
 
@@ -869,12 +1038,14 @@ bool RegAllocPBQP::runOnMachineFunction(MachineFunction &MF) {
   }
 
   // Finalise allocation, allocate empty ranges.
-  finalizeAlloc(MF, LIS, VRM);
+  finalizeAlloc(*MF, LIS, VRM);
   postOptimization(*VRegSpiller, LIS);
   VRegsToAlloc.clear();
   EmptyIntervalVRegs.clear();
 
   LLVM_DEBUG(dbgs() << "Post alloc VirtRegMap:\n" << VRM << "\n");
+
+  recordStats();
 
   return true;
 }

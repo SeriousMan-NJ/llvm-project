@@ -476,6 +476,24 @@ void TargetInstrInfo::getNoop(MCInst &NopInst) const {
   llvm_unreachable("Not implemented");
 }
 
+std::pair<unsigned, unsigned>
+TargetInstrInfo::getPatchpointUnfoldableRange(const MachineInstr &MI) const {
+  switch (MI.getOpcode()) {
+  case TargetOpcode::STACKMAP:
+    // StackMapLiveValues are foldable
+    return std::make_pair(0, StackMapOpers(&MI).getVarIdx());
+  case TargetOpcode::PATCHPOINT:
+    // For PatchPoint, the call args are not foldable (even if reported in the
+    // stackmap e.g. via anyregcc).
+    return std::make_pair(0, PatchPointOpers(&MI).getVarIdx());
+  case TargetOpcode::STATEPOINT:
+    // For statepoints, fold deopt and gc arguments, but not call arguments.
+    return std::make_pair(MI.getNumDefs(), StatepointOpers(&MI).getVarIdx());
+  default:
+    llvm_unreachable("unexpected stackmap opcode");
+  }
+}
+
 static MachineInstr *foldPatchpoint(MachineFunction &MF, MachineInstr &MI,
                                     ArrayRef<unsigned> Ops, int FrameIndex,
                                     const TargetInstrInfo &TII) {
