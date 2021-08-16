@@ -44,6 +44,11 @@ using namespace llvm;
 
 #define DEBUG_TYPE "regalloc"
 
+static cl::opt<bool> RecordStats(
+    "record-stats-basic", cl::Hidden,
+    cl::desc("Record stats"),
+    cl::init(false));
+
 static RegisterRegAlloc basicRegAlloc("basic", "basic register allocator",
                                       createBasicRegisterAllocator);
 
@@ -500,7 +505,8 @@ bool RABasic::runOnMachineFunction(MachineFunction &mf) {
   // Diagnostic output before rewriting
   LLVM_DEBUG(dbgs() << "Post alloc VirtRegMap:\n" << *VRM << "\n");
 
-  recordStats();
+  if (RecordStats)
+    recordStats();
 
   releaseMemory();
   return true;

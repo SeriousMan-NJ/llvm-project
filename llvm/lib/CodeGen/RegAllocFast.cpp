@@ -56,6 +56,11 @@ using namespace llvm;
 
 #define DEBUG_TYPE "regalloc"
 
+static cl::opt<bool> RecordStats(
+    "record-stats-fast", cl::Hidden,
+    cl::desc("Record stats"),
+    cl::init(false));
+
 STATISTIC(NumStores, "Number of stores added");
 STATISTIC(NumLoads , "Number of loads added");
 STATISTIC(NumCoalesced, "Number of copies coalesced");
@@ -1693,7 +1698,8 @@ bool RegAllocFast::runOnMachineFunction(MachineFunction &mf) {
   StackSlotForVirtReg.clear();
   LiveDbgValueMap.clear();
 
-  recordStats();
+  if (RecordStats)
+    recordStats();
 
   return true;
 }

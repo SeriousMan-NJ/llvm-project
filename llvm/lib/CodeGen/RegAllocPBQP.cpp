@@ -96,6 +96,11 @@ using namespace llvm;
 
 #define DEBUG_TYPE "regalloc"
 
+static cl::opt<bool> RecordStats(
+    "record-stats-pbqp", cl::Hidden,
+    cl::desc("Record stats"),
+    cl::init(false));
+
 static RegisterRegAlloc
 RegisterPBQPRepAlloc("pbqp", "PBQP register allocator",
                        createDefaultPBQPRegisterAllocator);
@@ -919,7 +924,8 @@ bool RegAllocPBQP::runOnMachineFunction(MachineFunction &mf) {
 
   LLVM_DEBUG(dbgs() << "Post alloc VirtRegMap:\n" << VRM << "\n");
 
-  recordStats();
+  if (RecordStats)
+    recordStats();
 
   return true;
 }

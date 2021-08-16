@@ -138,6 +138,11 @@ static cl::opt<bool> ConsiderLocalIntervalCost(
              "candidate when choosing the best split candidate."),
     cl::init(false));
 
+static cl::opt<bool> RecordStats(
+    "record-stats-greedy", cl::Hidden,
+    cl::desc("Record stats"),
+    cl::init(false));
+
 static cl::opt<unsigned> FallbackToPBQPMode(
     "fallback-to-pbqp-mode", cl::Hidden,
     cl::desc("Fallback to PBQP mode"),
@@ -3478,7 +3483,8 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   if (!FallbackToPBQP)
     reportNumberOfSplillsReloads();
 
-  recordStats();
+  if (RecordStats)
+    recordStats();
 
   releaseMemory();
   return true;
