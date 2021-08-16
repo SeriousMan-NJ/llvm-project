@@ -498,6 +498,7 @@ bool RABasic::runOnMachineFunction(MachineFunction &mf) {
   SpillerInstance.reset(createInlineSpiller(*this, *MF, *VRM));
 
   Filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".basic.txt";
+  FallbackToPBQP = false;
 
   allocatePhysRegs();
   postOptimization();
