@@ -38,8 +38,15 @@
 
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/CodeGen/RegisterClassInfo.h"
+#include <set>
 
 namespace llvm {
+
+enum FallbackMode {
+  No_Fallback,
+  Global_Split,
+  Local_Split
+};
 
 class LiveInterval;
 class LiveIntervals;
@@ -67,7 +74,10 @@ protected:
   LiveIntervals *LIS = nullptr;
   LiveRegMatrix *Matrix = nullptr;
   RegisterClassInfo RegClassInfo;
+  using RegSet = std::set<Register>;
+  RegSet VRegsToAlloc, EmptyIntervalVRegs;
   std::string Filename;
+  bool FallbackToPBQP;
 
   /// Inst which is a def of an original reg and whose defs are already all
   /// dead after remat is saved in DeadRemats. The deletion of such inst is

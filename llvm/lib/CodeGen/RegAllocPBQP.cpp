@@ -28,6 +28,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "RegAllocPBQP.h"
+#include "RegAllocBase.h"
 #include "llvm/CodeGen/RegAllocPBQP.h"
 #include "RegisterCoalescer.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -110,138 +112,9 @@ PBQPDumpGraphs("pbqp-dump-graphs",
                cl::init(false), cl::Hidden);
 #endif
 
-namespace {
-
-///
-/// PBQP based allocators solve the register allocation problem by mapping
-/// register allocation problems to Partitioned Boolean Quadratic
-/// Programming problems.
-class RegAllocPBQP : public MachineFunctionPass {
-public:
-  static char ID;
-
-  /// Construct a PBQP register allocator.
-  RegAllocPBQP(char *cPassID = nullptr)
-      : MachineFunctionPass(ID), customPassID(cPassID) {
-    initializeSlotIndexesPass(*PassRegistry::getPassRegistry());
-    initializeLiveIntervalsPass(*PassRegistry::getPassRegistry());
-    initializeLiveStacksPass(*PassRegistry::getPassRegistry());
-    initializeVirtRegMapPass(*PassRegistry::getPassRegistry());
-  }
-
-  /// Return the pass name.
-  StringRef getPassName() const override { return "PBQP Register Allocator"; }
-
-  /// PBQP analysis usage.
-  void getAnalysisUsage(AnalysisUsage &au) const override;
-
-  /// Perform register allocation
-  bool runOnMachineFunction(MachineFunction &MF) override;
-
-  MachineFunctionProperties getRequiredProperties() const override {
-    return MachineFunctionProperties().set(
-        MachineFunctionProperties::Property::NoPHIs);
-  }
-
-  MachineFunctionProperties getClearedProperties() const override {
-    return MachineFunctionProperties().set(
-      MachineFunctionProperties::Property::IsSSA);
-  }
-
-private:
-  // context
-  MachineFunction *MF;
-
-  using RegSet = std::set<Register>;
-
-  char *customPassID;
-
-  RegSet VRegsToAlloc, EmptyIntervalVRegs;
-  std::string Filename;
-
-  // Shortcuts to some useful interface.
-  const TargetInstrInfo *TII;
-
-  // analyses
-  MachineBlockFrequencyInfo *MBFI;
-  MachineLoopInfo *Loops;
-
-  /// Inst which is a def of an original reg and whose defs are already all
-  /// dead after remat is saved in DeadRemats. The deletion of such inst is
-  /// postponed till all the allocations are done, so its remat expr is
-  /// always available for the remat of all the siblings of the original reg.
-  SmallPtrSet<MachineInstr *, 32> DeadRemats;
-
-  /// Finds the initial set of vreg intervals to allocate.
-  void findVRegIntervalsToAlloc(const MachineFunction &MF, LiveIntervals &LIS);
-
-  /// Constructs an initial graph.
-  void initializeGraph(PBQPRAGraph &G, VirtRegMap &VRM, Spiller &VRegSpiller);
-
-  /// Spill the given VReg.
-  void spillVReg(Register VReg, SmallVectorImpl<Register> &NewIntervals,
-                 MachineFunction &MF, LiveIntervals &LIS, VirtRegMap &VRM,
-                 Spiller &VRegSpiller);
-
-  /// Given a solved PBQP problem maps this solution back to a register
-  /// assignment.
-  bool mapPBQPToRegAlloc(const PBQPRAGraph &G,
-                         const PBQP::Solution &Solution,
-                         VirtRegMap &VRM,
-                         Spiller &VRegSpiller);
-
-  /// Postprocessing before final spilling. Sets basic block "live in"
-  /// variables.
-  void finalizeAlloc(MachineFunction &MF, LiveIntervals &LIS,
-                     VirtRegMap &VRM) const;
-
-  void postOptimization(Spiller &VRegSpiller, LiveIntervals &LIS);
-
-  /// RA statistic to remark.
-  struct RAStats {
-    unsigned Reloads = 0;
-    unsigned FoldedReloads = 0;
-    unsigned ZeroCostFoldedReloads = 0;
-    unsigned Spills = 0;
-    unsigned FoldedSpills = 0;
-    unsigned Copies = 0;
-    float ReloadsCost = 0.0f;
-    float FoldedReloadsCost = 0.0f;
-    float SpillsCost = 0.0f;
-    float FoldedSpillsCost = 0.0f;
-    float CopiesCost = 0.0f;
-
-    bool isEmpty() {
-      return !(Reloads || FoldedReloads || Spills || FoldedSpills ||
-               ZeroCostFoldedReloads || Copies);
-    }
-
-    void add(RAStats other) {
-      Reloads += other.Reloads;
-      FoldedReloads += other.FoldedReloads;
-      ZeroCostFoldedReloads += other.ZeroCostFoldedReloads;
-      Spills += other.Spills;
-      FoldedSpills += other.FoldedSpills;
-      Copies += other.Copies;
-      ReloadsCost += other.ReloadsCost;
-      FoldedReloadsCost += other.FoldedReloadsCost;
-      SpillsCost += other.SpillsCost;
-      FoldedSpillsCost += other.FoldedSpillsCost;
-      CopiesCost += other.CopiesCost;
-    }
-  };
-
-  /// Compute statistic for a basic block.
-  RAStats computeStats(MachineBasicBlock &MBB);
-
-  /// Compute and report statistic through a remark.
-  RAStats recordStats(MachineLoop *L);
-
-  /// Report the statistic for each loop.
-  void recordStats();
-};
-
 char RegAllocPBQP::ID = 0;
+
+namespace {
 
 /// Set spill costs for each node in the PBQP reg-alloc graph.
 class SpillCosts : public PBQPRAConstraint {
@@ -763,7 +636,8 @@ void RegAllocPBQP::spillVReg(Register VReg,
   for (LiveRangeEdit::iterator I = LRE.begin(), E = LRE.end();
        I != E; ++I) {
     const LiveInterval &LI = LIS.getInterval(*I);
-    assert(!LI.empty() && "Empty spill range.");
+    // TODO[ywshin]
+    // assert(!LI.empty() && "Empty spill range.");
     LLVM_DEBUG(dbgs() << printReg(LI.reg(), &TRI) << " ");
     VRegsToAlloc.insert(LI.reg());
   }
@@ -1046,6 +920,96 @@ bool RegAllocPBQP::runOnMachineFunction(MachineFunction &mf) {
   LLVM_DEBUG(dbgs() << "Post alloc VirtRegMap:\n" << VRM << "\n");
 
   recordStats();
+
+  return true;
+}
+
+bool RegAllocPBQP::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &VRM, LiveIntervals &LIS, MachineLoopInfo* Loops, MachineBlockFrequencyInfo* MBFI, Spiller* VRegSpiller, RegSet vRegsToAlloc, RegSet emptyIntervalVRegs) {
+  // VRegsToAlloc = vRegsToAlloc;
+  // EmptyIntervalVRegs = emptyIntervalVRegs;
+  // VRM.clearAllVirt();
+
+  MF = &mf;
+
+  TII = MF->getSubtarget().getInstrInfo();
+  this->MBFI = MBFI;
+  this->Loops = Loops;
+
+  PBQPVirtRegAuxInfo VRAI(*MF, LIS, VRM, *Loops, *MBFI);
+  VRAI.calculateSpillWeightsAndHints();
+
+  MF->getRegInfo().freezeReservedRegs(*MF);
+
+  LLVM_DEBUG(dbgs() << "PBQP Register Allocating for " << MF->getName() << "\n");
+
+  // Allocator main loop:
+  //
+  // * Map current regalloc problem to a PBQP problem
+  // * Solve the PBQP problem
+  // * Map the solution back to a register allocation
+  // * Spill if necessary
+  //
+  // This process is continued till no more spills are generated.
+
+  // Find the vreg intervals in need of allocation.
+  findVRegIntervalsToAlloc(*MF, LIS);
+
+#ifndef NDEBUG
+  const Function &F = MF->getFunction();
+  std::string FullyQualifiedName =
+    F.getParent()->getModuleIdentifier() + "." + F.getName().str();
+#endif
+
+  // If there are non-empty intervals allocate them using pbqp.
+  if (!VRegsToAlloc.empty()) {
+    const TargetSubtargetInfo &Subtarget = MF->getSubtarget();
+    std::unique_ptr<PBQPRAConstraintList> ConstraintsRoot =
+      std::make_unique<PBQPRAConstraintList>();
+    ConstraintsRoot->addConstraint(std::make_unique<SpillCosts>());
+    ConstraintsRoot->addConstraint(std::make_unique<Interference>());
+    if (PBQPCoalescing)
+      ConstraintsRoot->addConstraint(std::make_unique<Coalescing>());
+    ConstraintsRoot->addConstraint(Subtarget.getCustomPBQPConstraints());
+
+    bool PBQPAllocComplete = false;
+    unsigned Round = 0;
+
+    while (!PBQPAllocComplete) {
+      LLVM_DEBUG(dbgs() << "  PBQP Regalloc round " << Round << ":\n");
+
+      PBQPRAGraph G(PBQPRAGraph::GraphMetadata(*MF, LIS, *MBFI));
+      initializeGraph(G, VRM, *VRegSpiller);
+      ConstraintsRoot->apply(G);
+
+#ifndef NDEBUG
+      if (PBQPDumpGraphs) {
+        std::ostringstream RS;
+        RS << Round;
+        std::string GraphFileName = FullyQualifiedName + "." + RS.str() +
+                                    ".pbqpgraph";
+        std::error_code EC;
+        raw_fd_ostream OS(GraphFileName, EC, sys::fs::OF_Text);
+        LLVM_DEBUG(dbgs() << "Dumping graph for round " << Round << " to \""
+                          << GraphFileName << "\"\n");
+        G.dump(OS);
+      }
+#endif
+
+      PBQP::Solution Solution = PBQP::RegAlloc::solve(G);
+      PBQPAllocComplete = mapPBQPToRegAlloc(G, Solution, VRM, *VRegSpiller);
+      ++Round;
+    }
+  }
+
+  // Finalise allocation, allocate empty ranges.
+  finalizeAlloc(*MF, LIS, VRM);
+  postOptimization(*VRegSpiller, LIS);
+  VRegsToAlloc.clear();
+  EmptyIntervalVRegs.clear();
+
+  LLVM_DEBUG(dbgs() << "Post alloc VirtRegMap:\n" << VRM << "\n");
+
+  // recordStats();
 
   return true;
 }

@@ -69,6 +69,7 @@
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
+#include "RegAllocPBQP.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -135,6 +136,16 @@ static cl::opt<bool> ConsiderLocalIntervalCost(
     "consider-local-interval-cost", cl::Hidden,
     cl::desc("Consider the cost of local intervals created by a split "
              "candidate when choosing the best split candidate."),
+    cl::init(false));
+
+static cl::opt<unsigned> FallbackToPBQPMode(
+    "fallback-to-pbqp-mode", cl::Hidden,
+    cl::desc("Fallback to PBQP mode"),
+    cl::init(FallbackMode::No_Fallback));
+
+static cl::opt<bool> SkipGlobalSplitting(
+    "skip-global-splitting", cl::Hidden,
+    cl::desc("Skip global splitting"),
     cl::init(false));
 
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
@@ -2508,6 +2519,10 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
     return tryInstructionSplit(VirtReg, Order, NewVRegs);
   }
 
+  if (SkipGlobalSplitting) {
+    return 0;
+  }
+
   NamedRegionTimer T("global_split", "Global Splitting", TimerGroupName,
                      TimerGroupDescription, TimePassesIsEnabled);
 
@@ -2811,6 +2826,10 @@ MCRegister RAGreedy::selectOrSplit(LiveInterval &VirtReg,
   LLVMContext &Ctx = MF->getFunction().getContext();
   SmallVirtRegSet FixedRegisters;
   MCRegister Reg = selectOrSplitImpl(VirtReg, NewVRegs, FixedRegisters);
+  if (FallbackToPBQP) {
+    (new RegAllocPBQP())->runOnMachineFunctionCustom(*MF, *VRM, *LIS, Loops, MBFI, &spiller(), VRegsToAlloc, EmptyIntervalVRegs);
+    return 0;
+  }
   if (Reg == ~0U && (CutOffInfo != CO_None)) {
     uint8_t CutOffEncountered = CutOffInfo & (CO_Depth | CO_Interf);
     if (CutOffEncountered == CO_Depth)
@@ -3129,6 +3148,13 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
   }
 
   if (Stage < RS_Spill) {
+    if (FallbackToPBQPMode == FallbackMode::Global_Split) {
+      if (LIS->intervalIsInOneMBB(VirtReg) && !VRM->hasKnownPreference(VirtReg.reg())) {
+        FallbackToPBQP = true;
+        return 0;
+      }
+    }
+
     // Try splitting VirtReg or interferences.
     unsigned NewVRegSizeBefore = NewVRegs.size();
     Register PhysReg = trySplit(VirtReg, Order, NewVRegs, FixedRegisters);
@@ -3157,6 +3183,10 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     LLVM_DEBUG(dbgs() << "Do as if this register is in memory\n");
     NewVRegs.push_back(VirtReg.reg());
   } else {
+    if (FallbackToPBQPMode == FallbackMode::Local_Split && getStage(VirtReg) == RS_Memory) {
+      FallbackToPBQP = true;
+      return 0;
+    }
     NamedRegionTimer T("spill", "Spiller", TimerGroupName,
                        TimerGroupDescription, TimePassesIsEnabled);
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
@@ -3360,6 +3390,13 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   LLVM_DEBUG(dbgs() << "********** GREEDY REGISTER ALLOCATION **********\n"
                     << "********** Function: " << mf.getName() << '\n');
 
+  if (FallbackToPBQPMode == FallbackMode::Local_Split) {
+    EnableDeferredSpilling.setValue(true);
+  }
+  if (FallbackToPBQPMode == FallbackMode::Local_Split && !EnableDeferredSpilling) {
+    report_fatal_error("EnableDeferredSpilling must be enabled to fallback to PBQP with FallbackMode::Local_Split");
+  }
+
   MF = &mf;
   TRI = MF->getSubtarget().getRegisterInfo();
   TII = MF->getSubtarget().getInstrInfo();
@@ -3408,12 +3445,39 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   GlobalCand.resize(32);  // This will grow as needed.
   SetOfBrokenHints.clear();
   LastEvicted.clear();
-  Filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".greedy.txt";
+
+  std::string suffix;
+  if (FallbackToPBQPMode == FallbackMode::No_Fallback) {
+    suffix = !SkipGlobalSplitting ? ".greedy.txt" : ".greedy-skip-global.txt";
+  } else if (FallbackToPBQPMode == FallbackMode::Global_Split && !SkipGlobalSplitting) {
+    suffix = ".pbqp-global.txt";
+  } else if (FallbackToPBQPMode == FallbackMode::Local_Split && SkipGlobalSplitting) {
+    suffix = ".pbqp-skip-global-local.txt";
+  } else if (FallbackToPBQPMode == FallbackMode::Local_Split) {
+    suffix = ".pbqp-local.txt";
+  } else {
+    suffix = ".unknown.txt";
+  }
+
+  Filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + suffix;
+
+  FallbackToPBQP = false;
+  VRegsToAlloc.clear();
+  EmptyIntervalVRegs.clear();
+  while (!Queue.empty()) {
+    Queue.pop();
+  }
 
   allocatePhysRegs();
-  tryHintsRecoloring();
+
+  if (!FallbackToPBQP)
+    tryHintsRecoloring();
+
   postOptimization();
-  reportNumberOfSplillsReloads();
+
+  if (!FallbackToPBQP)
+    reportNumberOfSplillsReloads();
+
   recordStats();
 
   releaseMemory();

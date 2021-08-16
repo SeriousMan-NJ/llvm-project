@@ -86,8 +86,9 @@ void VirtRegMap::assignVirt2Phys(Register virtReg, MCPhysReg physReg) {
   assert(Virt2PhysMap[virtReg.id()] == NO_PHYS_REG &&
          "attempt to assign physical register to already mapped "
          "virtual register");
-  assert(!getRegInfo().isReserved(physReg) &&
-         "Attempt to map virtReg to a reserved physReg");
+  // TODO[ywshin]
+  // assert(!getRegInfo().isReserved(physReg) &&
+  //        "Attempt to map virtReg to a reserved physReg");
   Virt2PhysMap[virtReg.id()] = physReg;
 }
 

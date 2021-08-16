@@ -112,6 +112,10 @@ void RegAllocBase::allocatePhysRegs() {
     VirtRegVec SplitVRegs;
     MCRegister AvailablePhysReg = selectOrSplit(*VirtReg, SplitVRegs);
 
+    if (FallbackToPBQP) {
+      return;
+    }
+
     if (AvailablePhysReg == ~0u) {
       // selectOrSplit failed to find a register!
       // Probably caused by an inline asm.
@@ -165,7 +169,8 @@ void RegAllocBase::allocatePhysRegs() {
 }
 
 void RegAllocBase::postOptimization() {
-  spiller().postOptimization();
+  if (!FallbackToPBQP)
+    spiller().postOptimization();
   for (auto DeadInst : DeadRemats) {
     LIS->RemoveMachineInstrFromMaps(*DeadInst);
     DeadInst->eraseFromParent();

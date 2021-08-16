@@ -561,8 +561,9 @@ void RegAllocFast::reloadAtBegin(MachineBasicBlock &MBB) {
     if (RegUnitStates[FirstUnit] == regLiveIn)
       continue;
 
-    assert((&MBB != &MBB.getParent()->front() || IgnoreMissingDefs) &&
-           "no reload in start block. Missing vreg def?");
+    // TODO[ywshin]
+    // assert((&MBB != &MBB.getParent()->front() || IgnoreMissingDefs) &&
+    //        "no reload in start block. Missing vreg def?");
 
     if (PrologLiveIns.count(PhysReg)) {
       // FIXME: Theoretically this should use an insert point skipping labels
