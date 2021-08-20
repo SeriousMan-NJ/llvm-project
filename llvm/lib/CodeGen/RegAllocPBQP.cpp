@@ -837,6 +837,11 @@ void RegAllocPBQP::recordStats() {
 }
 
 bool RegAllocPBQP::runOnMachineFunction(MachineFunction &mf) {
+  if (mf.RAOption != -1 && mf.RAOption != 3) {
+    // errs() << "Pass PBQP\n";
+    return true;
+  }
+
   MF = &mf;
 
   TII = MF->getSubtarget().getInstrInfo();

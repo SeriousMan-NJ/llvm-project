@@ -1101,6 +1101,7 @@ void TargetPassConfig::addMachinePasses() {
 
   // Run register allocation and passes that are tightly coupled with it,
   // including phi elimination and scheduling.
+  addPass(createRegisterAllocatorSelector());
   if (getOptimizeRegAlloc())
     addOptimizedRegAlloc();
   else
@@ -1319,7 +1320,16 @@ bool TargetPassConfig::addRegAssignAndRewriteFast() {
 
 bool TargetPassConfig::addRegAssignAndRewriteOptimized() {
   // Add the selected register allocation pass.
-  addPass(createRegAllocPass(true));
+  RegisterRegAlloc::FunctionPassCtor Ctor = RegisterRegAlloc::getDefault();
+  if (!usingDefaultRegAlloc()) {
+    errs() << "SELECT\n";
+    addPass(createRegAllocPass(true));
+  } else {
+    errs() << "DEFAULT\n";
+    addPass(createBasicRegisterAllocator());
+    addPass(createGreedyRegisterAllocator());
+    addPass(createDefaultPBQPRegisterAllocator());
+  }
 
   // Allow targets to change the register assignments before rewriting.
   addPreRewrite();

@@ -372,6 +372,7 @@ class MachineFunction {
   void init();
 
 public:
+  int RAOption;
   struct VariableDbgInfo {
     const DILocalVariable *Var;
     const DIExpression *Expr;

@@ -3392,6 +3392,25 @@ void RAGreedy::recordStats() {
 }
 
 bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
+  if (mf.RAOption != -1 && mf.RAOption != 2 && mf.RAOption < 4) {
+    // errs() << "Pass Greedy\n";
+    return true;
+  }
+
+  if (mf.RAOption == 4) {
+    FallbackToPBQPMode.setValue(0);
+    SkipGlobalSplitting.setValue(1);
+  } else if (mf.RAOption == 5) {
+    FallbackToPBQPMode.setValue(1);
+    SkipGlobalSplitting.setValue(0);
+  } else if (mf.RAOption == 6) {
+    FallbackToPBQPMode.setValue(2);
+    SkipGlobalSplitting.setValue(0);
+  } else if (mf.RAOption == 7) {
+    FallbackToPBQPMode.setValue(2);
+    SkipGlobalSplitting.setValue(1);
+  }
+
   LLVM_DEBUG(dbgs() << "********** GREEDY REGISTER ALLOCATION **********\n"
                     << "********** Function: " << mf.getName() << '\n');
 
@@ -3485,6 +3504,12 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
 
   if (RecordStats)
     recordStats();
+
+  if (mf.RAOption >= 4) {
+    FallbackToPBQPMode.setValue(0);
+    SkipGlobalSplitting.setValue(0);
+  }
+  EnableDeferredSpilling.setValue(false);
 
   releaseMemory();
   return true;

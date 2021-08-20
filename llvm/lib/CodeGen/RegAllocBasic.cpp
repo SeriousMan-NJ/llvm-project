@@ -481,6 +481,11 @@ void RABasic::recordStats() {
 }
 
 bool RABasic::runOnMachineFunction(MachineFunction &mf) {
+  if (mf.RAOption != -1 && mf.RAOption != 1) {
+    // errs() << "Pass Basic\n";
+    return true;
+  }
+
   LLVM_DEBUG(dbgs() << "********** BASIC REGISTER ALLOCATION **********\n"
                     << "********** Function: " << mf.getName() << '\n');
 
