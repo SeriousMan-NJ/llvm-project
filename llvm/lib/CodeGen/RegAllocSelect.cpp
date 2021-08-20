@@ -91,32 +91,20 @@ bool RASelect::runOnMachineFunction(MachineFunction &mf) {
   LLVM_DEBUG(dbgs() << "********** REGISTER ALLOCATIOR SELECTOR **********\n"
                     << "********** Function: " << mf.getName() << '\n');
   MF = &mf;
-  MF->RAOption = -1;
 
   std::string prefix = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber());
 
-  std::ifstream f(prefix + ".greedy.txt");
-  if (!f.good()) {
-    // errs() << "PASS\n";
-    return true;
-  }
-
-  // std::vector<std::string> allocators = {
-  //   ".fast.txt",
-  //   ".basic.txt",
-  //   ".greedy.txt",
-  //   ".pbqp.txt",
-  //   ".greedy-skip-global.txt",
-  //   ".pbqp-global.txt",
-  //   ".pbqp-local.txt",
-  //   ".pbqp-skip-global-local.txt"
-  // };
   std::vector<std::string> allocators = {
     ".fast.txt",
     ".basic.txt",
     ".greedy.txt",
-    ".pbqp.txt"
+    ".pbqp.txt",
+    ".greedy-skip-global.txt",
+    ".pbqp-global.txt",
+    ".pbqp-local.txt",
+    ".pbqp-skip-global-local.txt"
   };
+
   float min_cost = std::numeric_limits<float>::infinity();
   int min_index = -1;
 
@@ -127,6 +115,8 @@ bool RASelect::runOnMachineFunction(MachineFunction &mf) {
     std::string c;
     getline(f, c);
     if (std::stof(c) < min_cost) {
+      if (min_cost < 0)
+        report_fatal_error("min_cost must be >= 0");
       min_cost = std::stof(c);
       min_index = i;
     }
@@ -139,8 +129,6 @@ bool RASelect::runOnMachineFunction(MachineFunction &mf) {
     MF->RAOption = min_index;
   else
     MF->RAOption = -1;
-
-  // errs() << min_index << "\n";
 
   return true;
 }
