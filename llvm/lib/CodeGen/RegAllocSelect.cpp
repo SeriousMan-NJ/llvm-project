@@ -97,19 +97,25 @@ bool RASelect::runOnMachineFunction(MachineFunction &mf) {
 
   std::ifstream f(prefix + ".greedy.txt");
   if (!f.good()) {
-    errs() << "PASS\n";
+    // errs() << "PASS\n";
     return true;
   }
 
+  // std::vector<std::string> allocators = {
+  //   ".fast.txt",
+  //   ".basic.txt",
+  //   ".greedy.txt",
+  //   ".pbqp.txt",
+  //   ".greedy-skip-global.txt",
+  //   ".pbqp-global.txt",
+  //   ".pbqp-local.txt",
+  //   ".pbqp-skip-global-local.txt"
+  // };
   std::vector<std::string> allocators = {
     ".fast.txt",
     ".basic.txt",
     ".greedy.txt",
-    ".pbqp.txt",
-    ".greedy-skip-global.txt",
-    ".pbqp-global.txt",
-    ".pbqp-local.txt",
-    ".pbqp-skip-global-local.txt"
+    ".pbqp.txt"
   };
   float min_cost = std::numeric_limits<float>::infinity();
   int min_index = -1;

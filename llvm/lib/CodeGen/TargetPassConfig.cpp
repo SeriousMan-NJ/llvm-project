@@ -1322,10 +1322,10 @@ bool TargetPassConfig::addRegAssignAndRewriteOptimized() {
   // Add the selected register allocation pass.
   RegisterRegAlloc::FunctionPassCtor Ctor = RegisterRegAlloc::getDefault();
   if (!usingDefaultRegAlloc()) {
-    errs() << "SELECT\n";
+    // errs() << "SELECT\n";
     addPass(createRegAllocPass(true));
   } else {
-    errs() << "DEFAULT\n";
+    // errs() << "DEFAULT\n";
     addPass(createBasicRegisterAllocator());
     addPass(createGreedyRegisterAllocator());
     addPass(createDefaultPBQPRegisterAllocator());
