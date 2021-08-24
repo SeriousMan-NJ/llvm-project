@@ -132,10 +132,10 @@ bool RASelect::runOnMachineFunction(MachineFunction &mf) {
   if (f.good()) {
     std::string c;
     getline(f, c);
-    // getline(f, c);
-    // getline(f, c);
-    // getline(f, c);
-    // getline(f, c);
+    getline(f, c);
+    getline(f, c);
+    getline(f, c);
+    getline(f, c);
     min_cost = std::stof(c);
     min_index = 2;
     f.close();
@@ -147,10 +147,10 @@ bool RASelect::runOnMachineFunction(MachineFunction &mf) {
 
     std::string c;
     getline(f, c);
-    // getline(f, c);
-    // getline(f, c);
-    // getline(f, c);
-    // getline(f, c);
+    getline(f, c);
+    getline(f, c);
+    getline(f, c);
+    getline(f, c);
     if (std::stof(c) < min_cost * Hysteresis) {
       if (min_cost < 0)
         report_fatal_error("min_cost must be >= 0");
