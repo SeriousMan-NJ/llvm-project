@@ -1654,6 +1654,9 @@ void RegAllocFast::recordStats() {
   std::ofstream f(Filename);
   f << Stats.ReloadsCost + Stats.FoldedReloadsCost + Stats.SpillsCost + Stats.FoldedSpillsCost << "\n";
   f << Stats.CopiesCost << "\n";
+  f << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
+  f << MF->getName().str() << "\n";
+  f << std::numeric_limits<float>::infinity() << "\n";
   f.close();
 }
 

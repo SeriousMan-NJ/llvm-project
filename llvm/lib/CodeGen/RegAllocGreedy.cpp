@@ -2832,7 +2832,7 @@ MCRegister RAGreedy::selectOrSplit(LiveInterval &VirtReg,
   SmallVirtRegSet FixedRegisters;
   MCRegister Reg = selectOrSplitImpl(VirtReg, NewVRegs, FixedRegisters);
   if (FallbackToPBQP) {
-    (new RegAllocPBQP())->runOnMachineFunctionCustom(*MF, *VRM, *LIS, Loops, MBFI, &spiller(), VRegsToAlloc, EmptyIntervalVRegs);
+    Cost += (new RegAllocPBQP())->runOnMachineFunctionCustom(*MF, *VRM, *LIS, Loops, MBFI, &spiller(), VRegsToAlloc, EmptyIntervalVRegs);
     return 0;
   }
   if (Reg == ~0U && (CutOffInfo != CO_None)) {
@@ -3197,6 +3197,7 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
     spiller().spill(LRE);
     setStage(NewVRegs.begin(), NewVRegs.end(), RS_Done);
+    Cost += LRE.getParent().cost();
 
     // Tell LiveDebugVariables about the new ranges. Ranges not being covered by
     // the new regs are kept in LDV (still mapping to the old register), until
@@ -3388,6 +3389,9 @@ void RAGreedy::recordStats() {
   std::ofstream f(Filename);
   f << Stats.ReloadsCost + Stats.FoldedReloadsCost + Stats.SpillsCost + Stats.FoldedSpillsCost << "\n";
   f << Stats.CopiesCost << "\n";
+  f << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
+  f << MF->getName().str() << "\n";
+  f << Cost << "\n";
   f.close();
 }
 
@@ -3486,6 +3490,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   }
 
   Filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + suffix;
+  Cost = 0.0;
 
   FallbackToPBQP = false;
   VRegsToAlloc.clear();

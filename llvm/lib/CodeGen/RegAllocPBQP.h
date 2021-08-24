@@ -72,6 +72,7 @@ using namespace llvm;
 class RegAllocPBQP : public MachineFunctionPass {
 private:
   using RegSet = std::set<Register>;
+  float Cost;
 
 public:
   static char ID;
@@ -93,7 +94,7 @@ public:
 
   /// Perform register allocation
   bool runOnMachineFunction(MachineFunction &mf) override;
-  bool runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &VRM, LiveIntervals &LIS, MachineLoopInfo* Loops, MachineBlockFrequencyInfo* MBFI, Spiller* VRegSpiller, RegSet vRegsToAlloc, RegSet emptyIntervalVRegs);
+  float runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &VRM, LiveIntervals &LIS, MachineLoopInfo* Loops, MachineBlockFrequencyInfo* MBFI, Spiller* VRegSpiller, RegSet vRegsToAlloc, RegSet emptyIntervalVRegs);
 
   MachineFunctionProperties getRequiredProperties() const override {
     return MachineFunctionProperties().set(

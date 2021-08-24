@@ -301,10 +301,16 @@ float VirtRegAuxInfo::weightCalcHelper(LiveInterval &LI, SlotIndex *Start,
   // it is a preferred candidate for spilling.
   // FIXME: this gets much more complicated once we support non-trivial
   // re-materialization.
-  if (isRematerializable(LI, LIS, VRM, *MF.getSubtarget().getInstrInfo()))
+  if (isRematerializable(LI, LIS, VRM, *MF.getSubtarget().getInstrInfo())) {
     TotalWeight *= 0.5F;
+  }
 
-  if (IsLocalSplitArtifact)
+  LI.setCost(TotalWeight);
+
+  if (IsLocalSplitArtifact) {
+    // LI.setCost(NumInstr * normalize(TotalWeight, Start->distance(*End), 1));
     return normalize(TotalWeight, Start->distance(*End), NumInstr);
+  }
+  // LI.setCost(NumInstr * normalize(TotalWeight, LI.getSize(), 1));
   return normalize(TotalWeight, LI.getSize(), NumInstr);
 }

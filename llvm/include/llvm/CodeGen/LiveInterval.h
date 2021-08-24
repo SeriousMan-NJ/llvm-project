@@ -706,12 +706,15 @@ namespace llvm {
                                    /// ranges.
     const Register Reg; // the register or stack slot of this interval.
     float Weight = 0.0; // weight of this interval
+    float Cost = 0.0;
 
   public:
     Register reg() const { return Reg; }
     float weight() const { return Weight; }
-    void incrementWeight(float Inc) { Weight += Inc; }
+    float cost() const { return Cost; }
+    void incrementWeight(float Inc) { Weight += Inc; Cost += Inc; }
     void setWeight(float Value) { Weight = Value; }
+    void setCost(float Value) { Cost = Value; }
 
     LiveInterval(unsigned Reg, float Weight) : Reg(Reg), Weight(Weight) {}
 

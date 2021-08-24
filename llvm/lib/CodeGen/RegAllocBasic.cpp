@@ -305,6 +305,7 @@ bool RABasic::spillInterferences(LiveInterval &VirtReg, MCRegister PhysReg,
     // Spill the extracted interval.
     LiveRangeEdit LRE(&Spill, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
     spiller().spill(LRE);
+    Cost += LRE.getParent().cost();
   }
   return true;
 }
@@ -367,6 +368,7 @@ MCRegister RABasic::selectOrSplit(LiveInterval &VirtReg,
     return ~0u;
   LiveRangeEdit LRE(&VirtReg, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
   spiller().spill(LRE);
+  Cost += LRE.getParent().cost();
 
   // The live virtual register requesting allocation was spilled, so tell
   // the caller not to allocate anything during this round.
@@ -477,6 +479,9 @@ void RABasic::recordStats() {
   std::ofstream f(Filename);
   f << Stats.ReloadsCost + Stats.FoldedReloadsCost + Stats.SpillsCost + Stats.FoldedSpillsCost << "\n";
   f << Stats.CopiesCost << "\n";
+  f << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
+  f << MF->getName().str() << "\n";
+  f << Cost << "\n";
   f.close();
 }
 
@@ -504,6 +509,7 @@ bool RABasic::runOnMachineFunction(MachineFunction &mf) {
 
   Filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".basic.txt";
   FallbackToPBQP = false;
+  Cost = 0.0;
 
   allocatePhysRegs();
   postOptimization();

@@ -630,6 +630,7 @@ void RegAllocPBQP::spillVReg(Register VReg,
   LiveRangeEdit LRE(&LIS.getInterval(VReg), NewIntervals, MF, LIS, &VRM,
                     nullptr, &DeadRemats);
   VRegSpiller.spill(LRE);
+  Cost += LRE.getParent().cost();
 
   const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
   (void)TRI;
@@ -833,6 +834,9 @@ void RegAllocPBQP::recordStats() {
   std::ofstream f(Filename);
   f << Stats.ReloadsCost + Stats.FoldedReloadsCost + Stats.SpillsCost + Stats.FoldedSpillsCost << "\n";
   f << Stats.CopiesCost << "\n";
+  f << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
+  f << MF->getName().str() << "\n";
+  f << Cost << "\n";
   f.close();
 }
 
@@ -859,6 +863,7 @@ bool RegAllocPBQP::runOnMachineFunction(MachineFunction &mf) {
   MF->getRegInfo().freezeReservedRegs(*MF);
 
   Filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".pbqp.txt";
+  Cost = 0.0;
 
   LLVM_DEBUG(dbgs() << "PBQP Register Allocating for " << MF->getName() << "\n");
 
@@ -935,7 +940,7 @@ bool RegAllocPBQP::runOnMachineFunction(MachineFunction &mf) {
   return true;
 }
 
-bool RegAllocPBQP::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &VRM, LiveIntervals &LIS, MachineLoopInfo* Loops, MachineBlockFrequencyInfo* MBFI, Spiller* VRegSpiller, RegSet vRegsToAlloc, RegSet emptyIntervalVRegs) {
+float RegAllocPBQP::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &VRM, LiveIntervals &LIS, MachineLoopInfo* Loops, MachineBlockFrequencyInfo* MBFI, Spiller* VRegSpiller, RegSet vRegsToAlloc, RegSet emptyIntervalVRegs) {
   // VRegsToAlloc = vRegsToAlloc;
   // EmptyIntervalVRegs = emptyIntervalVRegs;
   // VRM.clearAllVirt();
@@ -945,6 +950,7 @@ bool RegAllocPBQP::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &V
   TII = MF->getSubtarget().getInstrInfo();
   this->MBFI = MBFI;
   this->Loops = Loops;
+  Cost = 0.0;
 
   PBQPVirtRegAuxInfo VRAI(*MF, LIS, VRM, *Loops, *MBFI);
   VRAI.calculateSpillWeightsAndHints();
@@ -1022,7 +1028,7 @@ bool RegAllocPBQP::runOnMachineFunctionCustom(MachineFunction &mf, VirtRegMap &V
 
   // recordStats();
 
-  return true;
+  return Cost;
 }
 
 /// Create Printable object for node and register info.

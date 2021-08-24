@@ -78,6 +78,7 @@ protected:
   RegSet VRegsToAlloc, EmptyIntervalVRegs;
   std::string Filename;
   bool FallbackToPBQP;
+  float Cost;
 
   /// Inst which is a def of an original reg and whose defs are already all
   /// dead after remat is saved in DeadRemats. The deletion of such inst is
