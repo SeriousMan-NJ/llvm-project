@@ -114,6 +114,7 @@ static int getRound(std::string filename) {
     // errs() << "GOOD\n";
     std::string r;
     getline(f, r);
+    f.close();
     return std::stoi(r);
   } else {
     errs() << "BAD\n";
@@ -128,6 +129,7 @@ static bool isSuboptimal(std::string filename) {
     std::string s2;
     getline(f, s1);
     getline(f, s2);
+    f.close();
     return std::stoi(s1) < std::stoi(s2);
   } else {
     return false;
