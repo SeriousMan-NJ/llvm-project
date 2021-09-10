@@ -105,7 +105,9 @@ void RegAllocBase::seedLiveRegs() {
   }
 }
 
-static int getRound(std::string filename) {
+int RegAllocBase::getRound(std::string filename) {
+  if (!_EnableFallback) return __INT_MAX__;
+
   if (filename.find("mkl-dnn/tests/gtests") != std::string::npos) return __INT_MAX__;
 
   // return __INT_MAX__;
@@ -122,7 +124,9 @@ static int getRound(std::string filename) {
   }
 }
 
-static bool isSuboptimal(std::string filename) {
+bool RegAllocBase::isSuboptimal(std::string filename) {
+  if (!_EnableFallback) return false;
+
   std::ifstream f(filename);
   if (f.good()) {
     std::string s1;

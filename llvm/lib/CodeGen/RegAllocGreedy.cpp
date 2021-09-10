@@ -3700,6 +3700,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   SplitCanCauseLocalSpill = 0;
   checkSplit = false;
   behaviourLevel = 0;
+  _EnableFallback = EnableFallback;
 
   maybeSuboptimal();
 
@@ -3733,5 +3734,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
     setBehaviourLevel();
 
   releaseMemory();
+
+  _EnableFallback = false;
   return true;
 }

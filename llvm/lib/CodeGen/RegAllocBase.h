@@ -116,12 +116,16 @@ protected:
   virtual void aboutToRemoveInterval(LiveInterval &LI) {}
   virtual float calcPotentialSpillCosts() { return -1; }
 
+  int getRound(std::string filename);
+  bool isSuboptimal(std::string filename);
+
   float MinSpillCost;
   int Round;
   int MinRound;
   int Limit;
   bool Fallback;
   bool MaybeSuboptimal;
+  bool _EnableFallback = false;
 
   // Live ranges pass through a number of stages as we try to allocate them.
   // Some of the stages may also create new live ranges:
