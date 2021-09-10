@@ -3534,7 +3534,8 @@ void RAGreedy::writeStat() {
   f << MinSpillCost << "\n";
   f << calcPotentialSpillCosts() << "\n";
   if (OnlyThreshold) {
-    f << (MinSpillCost < calcPotentialSpillCosts() * 0.1 * Threshold) << "\n";
+    if (Threshold == 10U) f << (MinSpillCost < calcPotentialSpillCosts() * Hysteresis) << "\n";
+    else f << (MinSpillCost < calcPotentialSpillCosts() * 0.1 * Threshold) << "\n";
   } else {
     f << (MaybeSuboptimal &&
         ((MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 100) ||
