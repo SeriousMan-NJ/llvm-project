@@ -117,17 +117,11 @@ protected:
   virtual float calcPotentialSpillCosts() { return -1; }
 
   float MinSpillCost;
-  float MinThresholdCost;
   int Round;
   int MinRound;
-  int Threshold;
-  int MinThresholdRound;
   int Limit;
   bool Fallback;
-  int LookaheadThreshold;
   bool MaybeSuboptimal;
-  bool MaybeSuboptimal2;
-  bool MaybeSuboptimal3;
 
   // Live ranges pass through a number of stages as we try to allocate them.
   // Some of the stages may also create new live ranges:

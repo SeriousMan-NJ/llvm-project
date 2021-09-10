@@ -160,28 +160,8 @@ WriteStat("write-stat",
     cl::init(true), cl::Hidden);
 
 static cl::opt<bool>
-AppendStat("append-stat",
-    cl::desc("Append stat"),
-    cl::init(false), cl::Hidden);
-
-static cl::opt<bool>
-WritePatSubopt("write-pat-suboptimal",
-    cl::desc("Write patterned suboptimal"),
-    cl::init(false), cl::Hidden);
-
-cl::opt<int>
-OptLookaheadThreshold("lookahead-threshold",
-    cl::desc("Lookahead Threshold. -1 for infinite"),
-    cl::init(-1), cl::Hidden);
-
-static cl::opt<bool>
 OnlyMaybeSuboptimal("only-maybe-suboptimal",
     cl::desc("Only maybe suboptimal"),
-    cl::init(false), cl::Hidden);
-
-static cl::opt<bool>
-OnlyOverCostThreshold("only-over-cost-threshold",
-    cl::desc("Only over cost threhold"),
     cl::init(false), cl::Hidden);
 
 static cl::opt<unsigned>
@@ -195,9 +175,14 @@ UsePBQP("use-pbqp",
         cl::init(false), cl::Hidden);
 
 static cl::opt<bool>
-SkipSplitting("skip-splitting",
-              cl::desc("Skip Splitting"),
-              cl::init(false), cl::Hidden);
+OnlyThreshold("only-threshold",
+        cl::desc("Only threshold"),
+        cl::init(false), cl::Hidden);
+
+static cl::opt<unsigned>
+Threshold("threshold",
+        cl::desc("Reciprocal threshold"),
+        cl::init(8), cl::Hidden);
 
 static cl::opt<bool>
 CheckSplit("check-split",
@@ -659,7 +644,6 @@ private:
 
   float calcPotentialSpillCosts() override;
   void writeStat();
-  void appendStat();
   // Helper for spilling all live virtual registers currently unified under preg
   // that interfere with the most recently queried lvr.  Return true if spilling
   // was successful, and append any new spilled/split intervals to splitLVRs.
@@ -1263,8 +1247,8 @@ MCRegister RAGreedy::tryEvict(LiveInterval &VirtReg, AllocationOrder &Order,
                             SmallVectorImpl<Register> &NewVRegs,
                             uint8_t CostPerUseLimit,
                             const SmallVirtRegSet &FixedRegisters) {
-  NamedRegionTimer T("evict", "Evict", TimerGroupName, TimerGroupDescription,
-                     true);
+  // NamedRegionTimer T("evict", "Evict", TimerGroupName, TimerGroupDescription,
+  //                    true);
 
   // Keep track of the cheapest interference seen so far.
   EvictionCost BestCost;
@@ -2596,8 +2580,8 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
 
   // Local intervals are handled separately.
   if (LIS->intervalIsInOneMBB(VirtReg)) {
-    NamedRegionTimer T("local_split", "Local Splitting", TimerGroupName,
-                       TimerGroupDescription, true);
+    // NamedRegionTimer T("local_split", "Local Splitting", TimerGroupName,
+    //                    TimerGroupDescription, true);
     SA->analyze(&VirtReg);
     Register PhysReg = tryLocalSplit(VirtReg, Order, NewVRegs);
     if (PhysReg || !NewVRegs.empty()) {
@@ -2619,8 +2603,8 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
     }
     return 0;
   }
-  NamedRegionTimer T("global_split", "Global Splitting", TimerGroupName,
-                     TimerGroupDescription, true);
+  // NamedRegionTimer T("global_split", "Global Splitting", TimerGroupName,
+  //                    TimerGroupDescription, true);
 
   SA->analyze(&VirtReg);
 
@@ -3253,14 +3237,13 @@ static bool isMaybeSuboptimal(std::string filename) {
   std::ifstream f(filename);
   if (f.good()) {
     std::string r;
-    getline(f, r);
-    getline(f, r);
-    getline(f, r);
-    getline(f, r);
-    getline(f, r);
-    getline(f, r);
-    getline(f, r);
+    getline(f, r); // MinRound
+    getline(f, r); // Round
+    getline(f, r); // spill cost
+    getline(f, r); // MinSpillCost
+    getline(f, r); // is pattern matched
     // if (std::stod(r) > 0) errs() << "BINGO\n";
+    f.close();
     return std::stoi(r) > 0 ? true : false;
   } else {
     errs() << "PASS\n";
@@ -3269,40 +3252,6 @@ static bool isMaybeSuboptimal(std::string filename) {
 }
 
 static std::string prev_filename = "";
-
-static bool overCostThreshold(std::string filename) {
-  if (!OnlyOverCostThreshold) return true;
-
-  std::ifstream f(filename);
-  if (f.good()) {
-    std::string t;
-    std::string r1;
-    std::string r2;
-    std::string c1;
-    std::string c2;
-    getline(f, r1);
-    getline(f, r2);
-    getline(f, c1);
-    getline(f, t);
-    getline(f, t);
-    getline(f, c2);
-    getline(f, t);
-
-    bool flag = std::stoi(r1) < std::stoi(r2) && std::stof(c1) < std::stof(c2) * 0.8;
-    if (flag && prev_filename != filename) {
-      const char* f = "/home/ywshin/threshold.txt";
-      std::error_code EC;
-      raw_fd_ostream OS(f, EC, sys::fs::OF_Append);
-      OS << filename << "\n";
-      OS.flush();
-      prev_filename = filename;
-    }
-    return flag;
-  } else {
-    errs() << "PASS\n";
-    return false;
-  }
-}
 
 MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
                                        SmallVectorImpl<Register> &NewVRegs,
@@ -3314,16 +3263,16 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
       AllocationOrder::create(VirtReg.reg(), *VRM, RegClassInfo, Matrix);
 
   std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
-  if (UsePBQP && isMaybeSuboptimal(filename) && overCostThreshold(filename) && EnableFallback && Round > Limit) {
+  if (UsePBQP && isMaybeSuboptimal(filename) && EnableFallback && Round > Limit) {
     errs() << "FALLBACK to PBQP!!!\n";
     (new RegAllocPBQP())->runOnMachineFunctionCustom(*MF, *VRM, *LIS, Loops, MBFI, &spiller(), VRegsToAlloc, EmptyIntervalVRegs);
     MCRegister Reg;
     Reg.setPBQP();
     return Reg;
-  } else if (!SkipSplitting && isMaybeSuboptimal(filename) && overCostThreshold(filename) && EnableFallback && Round > Limit) {
-    errs() << "TEST\n";
+  } else if (isMaybeSuboptimal(filename) && EnableFallback && Round > Limit) {
+    errs() << "BASIC!\n";
     Fallback = true;
-    // errs() << "NOW FALLBACK TO BASIC!\n";
+
     // Populate a list of physical register spill candidates.
     SmallVector<MCRegister, 8> PhysRegSpillCands;
 
@@ -3435,18 +3384,14 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     return 0;
   }
 
-  if (EnableFallback && Round > Limit && SkipSplitting) {
-    errs() << "SKIP SPLITTING!\n";
-  } else {
-    if (Stage < RS_Spill) {
-      // Try splitting VirtReg or interferences.
-      unsigned NewVRegSizeBefore = NewVRegs.size();
-      Register PhysReg = trySplit(VirtReg, Order, NewVRegs, FixedRegisters);
-      if (PhysReg || (NewVRegs.size() - NewVRegSizeBefore)) {
-        // If VirtReg got split, the eviction info is no longer relevant.
-        LastEvicted.clearEvicteeInfo(VirtReg.reg());
-        return PhysReg;
-      }
+  if (Stage < RS_Spill) {
+    // Try splitting VirtReg or interferences.
+    unsigned NewVRegSizeBefore = NewVRegs.size();
+    Register PhysReg = trySplit(VirtReg, Order, NewVRegs, FixedRegisters);
+    if (PhysReg || (NewVRegs.size() - NewVRegSizeBefore)) {
+      // If VirtReg got split, the eviction info is no longer relevant.
+      LastEvicted.clearEvicteeInfo(VirtReg.reg());
+      return PhysReg;
     }
   }
 
@@ -3473,8 +3418,8 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     LLVM_DEBUG(dbgs() << "Do as if this register is in memory\n");
     NewVRegs.push_back(VirtReg.reg());
   } else {
-    NamedRegionTimer T("spill", "Spiller", TimerGroupName,
-                       TimerGroupDescription, true);
+    // NamedRegionTimer T("spill", "Spiller", TimerGroupName,
+    //                    TimerGroupDescription, true);
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
     // errs() << "Spill\n";
     printCost("spill");
@@ -3584,38 +3529,22 @@ void RAGreedy::writeStat() {
   std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
   std::ofstream f(filename);
 
-  if (calcPotentialSpillCosts() < 100 && MinSpillCost >= calcPotentialSpillCosts() * 0.80) {
-    MaybeSuboptimal3 = false;
-  }
-
   f << MinRound << "\n";
   f << Round << "\n";
   f << MinSpillCost << "\n";
-  f << MinThresholdRound << "\n";
-  f << MinThresholdCost << "\n";
   f << calcPotentialSpillCosts() << "\n";
-  f << ((MaybeSuboptimal && MinSpillCost < calcPotentialSpillCosts() * 0.91)
-        || (MaybeSuboptimal2 && MinSpillCost < calcPotentialSpillCosts() * Hysteresis)
-        || (MaybeSuboptimal3 && MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 50)) << "\n";
+  if (OnlyThreshold) {
+    f << (MinSpillCost < calcPotentialSpillCosts() * 0.1 * Threshold) << "\n";
+  } else {
+    f << (MaybeSuboptimal &&
+        ((MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 100) ||
+        (MinSpillCost < calcPotentialSpillCosts() * 0.90 && 50 <= calcPotentialSpillCosts() && calcPotentialSpillCosts() < 100))) << "\n";
+  }
   f << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
   f << MF->getName().str() << "\n";
   f << SplitCanCauseEvictionChain << "\n";
   f << SplitCanCauseLocalSpill << "\n";
   f.close();
-}
-
-void RAGreedy::appendStat() {
-  const char* filename = "/home/ywshin/stat.txt";
-  // std::remove("/home/ywshin/stat.txt");
-  std::error_code EC;
-  raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
-  OS << MinRound << "\n";
-  OS << Round << "\n";
-  OS << MinSpillCost << "\n";
-  OS << calcPotentialSpillCosts() << "\n";
-  OS << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
-  OS << MF->getName().str() << "\n";
-  OS.flush();
 }
 
 void RAGreedy::maybeSuboptimal(MachineLoop* L, LoopInfoCustom *I) {
@@ -3644,10 +3573,7 @@ void RAGreedy::maybeSuboptimal(MachineLoop* L, LoopInfoCustom *I) {
 }
 
 void RAGreedy::maybeSuboptimal() {
-  std::string filename = "/home/ywshin/llvm-test-suite/maybe/" + std::to_string(getpid()) + ".txt";
-  std::string f = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
-  std::error_code EC;
-  // raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
+  if (OnlyThreshold) return;
 
   LoopInfoCustom I = {0, 0, 0, 0, true, 0};
 
@@ -3655,92 +3581,7 @@ void RAGreedy::maybeSuboptimal() {
   for (MachineLoop *L : *Loops) {
     maybeSuboptimal(L, &I);
     loopExist = true;
-    // int num_inst = 0;
-    // int m = 0;
-    // std::vector<Register> v;
-
-    // for (MachineBasicBlock *MBB : L->getBlocks()) {
-    //   // Loop overall size
-    //   for (MachineInstr &MI : *MBB) {
-    //     num_inst++;
-
-    //     for (int i = 0; i < MI.getNumOperands(); i++) {
-    //       auto operand = MI.getOperand(i);
-
-    //       if (!operand.isReg())
-    //         continue;
-
-    //       auto reg = operand.getReg();
-
-    //       if (reg.isPhysical() || !reg.isVirtual() || !reg.isValid() || reg.isStack())
-    //         continue;
-    //       if (MRI->reg_nodbg_empty(reg))
-    //         continue;
-
-    //       if(std::find(v.begin(), v.end(), reg) == v.end())
-    //         v.push_back(reg);
-    //     }
-    //   }
-    //   int n = 0;
-
-    //   // Register pressure
-    //   for (auto r1 : v) {
-    //     auto &L1 = LIS->getInterval(r1);
-    //     if (L1.empty()) continue;
-    //     int c = 0;
-    //     for (auto r2 : v) {
-    //       if (r1 == r2) continue;
-    //       auto &L2 = LIS->getInterval(r2);
-    //       if (L2.empty()) continue;
-    //       if (L1.overlaps(L2)) {
-    //         c++;
-    //       }
-    //     }
-    //     if (c >= 10) {
-    //       n++;
-    //       m++;
-    //     }
-    //   }
-
-    //   if (n > 0 && num_inst > 0) {
-    //     errs() << "SIZE:" << n << "," << m << "," << num_inst << "\n";
-    //     if (n > 20 && n / (float)num_inst > 0.2 && num_inst > 100 || n > 15 && n / (float)num_inst > 0.45 && num_inst > 35) {
-    //       errs() << "INST: " << num_inst << "\n";
-    //       errs() << "BINGO: " << filename << "\n";
-    //       MaybeSuboptimal = true;
-    //     }
-    //     if (WritePatSubopt) {
-    //       raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
-    //       OS << n << "\n";
-    //       OS << num_inst << "\n";
-    //       OS << MinSpillCost << "\n";
-    //       OS << calcPotentialSpillCosts() << "\n";
-    //       OS << f << "\n";
-    //       OS << "type 1\n";
-    //     }
-    //   }
-    // }
-    // if (m > 0 && num_inst > 0) {
-    //   if (m > 40 && m / (float)num_inst > 0.1 && num_inst > 160 || m > 100 && m / (float)num_inst > 3 && num_inst > 50) {
-    //     errs() << "INST: " << num_inst << "\n";
-    //     errs() << "BINGO: " << filename << "\n";
-    //     MaybeSuboptimal2 = true;
-    //   }
-    //   if (WritePatSubopt) {
-    //     raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
-    //     OS << m << "\n";
-    //     OS << num_inst << "\n";
-    //     OS << MinSpillCost << "\n";
-    //     OS << calcPotentialSpillCosts() << "\n";
-    //     OS << f << "\n";
-    //     OS << "type 2\n";
-    //   }
-    // }
   }
-
-  // if (!loopExist) {
-    MaybeSuboptimal3 = true;
-  // }
 
   // Exclude when majority of the loops are small
   errs() << "INNER LOOPS:" << I.num_small_innermost << "," << I.num_innermost << " | " << I.num_loop_inst << "," << I.num_innermost_inst << "\n";
@@ -3752,19 +3593,7 @@ void RAGreedy::maybeSuboptimal() {
       ( (float)I.num_small_innermost / I.num_innermost > 0.4 && I.num_loop_inst < 3.8 * I.num_innermost_inst ) ||
       ( I.num_innermost > 30 && (float)I.num_small_innermost / I.num_innermost > 0.85 )) {
     MaybeSuboptimal = false;
-    MaybeSuboptimal2 = false;
-    MaybeSuboptimal3 = false;
   }
-  // if (WritePatSubopt) {
-  //   raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
-  //   OS << num_small_inner_loops << "\n";
-  //   OS << num_inner_loops << "\n";
-  //   OS << MinSpillCost << "\n";
-  //   OS << calcPotentialSpillCosts() << "\n";
-  //   OS << filename << "\n";
-  //   OS << "type 3\n";
-  // }
-  // OS.flush();
 }
 
 void RAGreedy::doesSplitExist() {
@@ -3783,7 +3612,7 @@ void RAGreedy::setBehaviourLevel() {
   if (MinRound < Round) behaviourLevel = 3;
   if (MinSpillCost < calcPotentialSpillCosts() * 0.90) behaviourLevel = 4;
 
-  bool pattern = MaybeSuboptimal3;
+  bool pattern = MaybeSuboptimal;
   if (calcPotentialSpillCosts() < 100 && MinSpillCost >= calcPotentialSpillCosts() * 0.80) {
     pattern = false;
   }
@@ -3799,11 +3628,6 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   // NamedRegionTimer T("total", "Total", TimerGroupName, TimerGroupDescription, true);
   LLVM_DEBUG(dbgs() << "********** GREEDY REGISTER ALLOCATION **********\n"
                     << "********** Function: " << mf.getName() << '\n');
-  // errs() << mf.getFunction().getParent()->getSourceFileName() << "\n";
-  // errs() << sys::path::parent_path(mf.getFunction().getParent()->getModuleIdentifier()) << "\n";
-  // errs() << sys::path::stem(mf.getFunction().getParent()->getModuleIdentifier()) << "\n";
-  // errs() << mf.getName() << "\n";
-  // errs() << mf.getFunctionNumber() << "\n";
 
   MF = &mf;
   TRI = MF->getSubtarget().getRegisterInfo();
@@ -3823,7 +3647,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
     MF->verify(this, "Before greedy register allocator");
 
 {
-  NamedRegionTimer T("analysis", "Analysis", TimerGroupName, TimerGroupDescription, true);
+  // NamedRegionTimer T("analysis", "Analysis", TimerGroupName, TimerGroupDescription, true);
   RegAllocBase::init(getAnalysis<VirtRegMap>(),
                      getAnalysis<LiveIntervals>(),
                      getAnalysis<LiveRegMatrix>());
@@ -3861,17 +3685,11 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   SpillCostMap.clear();
   SpilledCost = 0.0;
   MinSpillCost = huge_valf;
-  MinThresholdCost = huge_valf;
   Round = 0;
   MinRound = 0;
-  MinThresholdRound = 0;
-  LookaheadThreshold = OptLookaheadThreshold;
-  Threshold = OptLookaheadThreshold;
   Limit = 0;
   Fallback = false;
-  MaybeSuboptimal = false;
-  MaybeSuboptimal2 = false;
-  MaybeSuboptimal3 = false;
+  MaybeSuboptimal = true;
   VRegsToAlloc.clear();
   EmptyIntervalVRegs.clear();
   isPBQP = false;
@@ -3886,7 +3704,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   maybeSuboptimal();
 
 {
-  NamedRegionTimer T("regalloc", "Register allocation", TimerGroupName, TimerGroupDescription, true);
+  // NamedRegionTimer T("regalloc", "Register allocation", TimerGroupName, TimerGroupDescription, true);
   allocatePhysRegs();
 }
 
@@ -3896,17 +3714,12 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   if (VerifyEnabled)
     MF->verify(this, "Before post optimization");
 {
-  NamedRegionTimer T("post-optimization", "Post Optimization", TimerGroupName, TimerGroupDescription, true);
+  // NamedRegionTimer T("post-optimization", "Post Optimization", TimerGroupName, TimerGroupDescription, true);
   postOptimization();
 }
 
-  // maybeSuboptimal();
-
   if (WriteStat)
     writeStat();
-
-  if (AppendStat)
-    appendStat();
 
   printCost(-1);
 

@@ -212,9 +212,6 @@ void RegAllocBase::allocatePhysRegs() {
   if (MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
     MinSpillCost = calcPotentialSpillCosts();
   }
-  if (MinThresholdCost >= calcPotentialSpillCosts() * Hysteresis) {
-    MinThresholdCost = calcPotentialSpillCosts();
-  }
 
   MachineFunction &mf = VRM->getMachineFunction();
   std::string filename = mf.getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(mf.getFunctionNumber()) + ".txt";
@@ -247,15 +244,6 @@ void RegAllocBase::allocatePhysRegs() {
       if (!Fallback && MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
         MinSpillCost = calcPotentialSpillCosts();
         MinRound = Round;
-      }
-      if (!Fallback && MinThresholdCost >= calcPotentialSpillCosts() * Hysteresis) {
-        if (Threshold > 0) {
-          MinThresholdCost = calcPotentialSpillCosts();
-          MinThresholdRound = Round;
-          Threshold = LookaheadThreshold;
-        }
-      } else if (!Fallback && MinThresholdCost < calcPotentialSpillCosts() * Hysteresis) {
-        Threshold--;
       }
       printCost(calcPotentialSpillCosts());
       // errs() << calcPotentialSpillCosts() << "\n";
@@ -317,15 +305,6 @@ void RegAllocBase::allocatePhysRegs() {
         MinSpillCost = calcPotentialSpillCosts();
         MinRound = Round;
       }
-      if (!Fallback && MinThresholdCost >= calcPotentialSpillCosts() * Hysteresis) {
-        if (Threshold > 0) {
-          MinThresholdCost = calcPotentialSpillCosts();
-          MinThresholdRound = Round;
-          Threshold = LookaheadThreshold;
-        }
-      } else if (!Fallback && MinThresholdCost < calcPotentialSpillCosts() * Hysteresis) {
-        Threshold--;
-      }
       printCost(calcPotentialSpillCosts());
       // errs() << calcPotentialSpillCosts() << "\n";
       continue;
@@ -365,15 +344,6 @@ void RegAllocBase::allocatePhysRegs() {
       MinSpillCost = calcPotentialSpillCosts();
       MinRound = Round;
     }
-    if (!Fallback && MinThresholdCost >= calcPotentialSpillCosts() * Hysteresis) {
-      if (Threshold > 0) {
-        MinThresholdCost = calcPotentialSpillCosts();
-        MinThresholdRound = Round;
-        Threshold = LookaheadThreshold;
-      }
-    } else if (!Fallback && MinThresholdCost < calcPotentialSpillCosts() * Hysteresis) {
-      Threshold--;
-    }
     printCost("enqueue");
     printCost(calcPotentialSpillCosts());
     // errs() << calcPotentialSpillCosts() << "\n";
@@ -382,15 +352,6 @@ void RegAllocBase::allocatePhysRegs() {
   if (!Fallback && MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
     MinSpillCost = calcPotentialSpillCosts();
     MinRound = Round;
-  }
-  if (!Fallback && MinThresholdCost >= calcPotentialSpillCosts() * Hysteresis) {
-    if (Threshold > 0) {
-      MinThresholdCost = calcPotentialSpillCosts();
-      MinThresholdRound = Round;
-      Threshold = LookaheadThreshold;
-    }
-  } else if (!Fallback && MinThresholdCost < calcPotentialSpillCosts() * Hysteresis) {
-    Threshold--;
   }
 
   if (MinSpillCost * Hysteresis > calcPotentialSpillCosts()) {
