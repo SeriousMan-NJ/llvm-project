@@ -3263,13 +3263,13 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
       AllocationOrder::create(VirtReg.reg(), *VRM, RegClassInfo, Matrix);
 
   std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
-  if (UsePBQP && isMaybeSuboptimal(filename) && EnableFallback && Round > Limit) {
+  if (EnableFallback && UsePBQP && isMaybeSuboptimal(filename) && Round > Limit) {
     errs() << "FALLBACK to PBQP!!!\n";
     (new RegAllocPBQP())->runOnMachineFunctionCustom(*MF, *VRM, *LIS, Loops, MBFI, &spiller(), VRegsToAlloc, EmptyIntervalVRegs);
     MCRegister Reg;
     Reg.setPBQP();
     return Reg;
-  } else if (isMaybeSuboptimal(filename) && EnableFallback && Round > Limit) {
+  } else if (EnableFallback && isMaybeSuboptimal(filename) && Round > Limit) {
     errs() << "BASIC!\n";
     Fallback = true;
 
