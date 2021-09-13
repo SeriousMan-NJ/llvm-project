@@ -3539,7 +3539,7 @@ void RAGreedy::writeStat() {
   } else {
     f << (MaybeSuboptimal &&
         ((MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 100) ||
-        (MinSpillCost < calcPotentialSpillCosts() * 0.90 && 50 <= calcPotentialSpillCosts() && calcPotentialSpillCosts() < 100))) << "\n";
+        (MinSpillCost < calcPotentialSpillCosts() * 0.80 && 50 <= calcPotentialSpillCosts() && calcPotentialSpillCosts() < 100))) << "\n";
   }
   f << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
   f << MF->getName().str() << "\n";
