@@ -62,6 +62,9 @@ class RegAllocBase {
   virtual void anchor();
 
 protected:
+  // context
+  MachineFunction *MF;
+
   const TargetRegisterInfo *TRI = nullptr;
   MachineRegisterInfo *MRI = nullptr;
   VirtRegMap *VRM = nullptr;
@@ -125,7 +128,6 @@ protected:
   int Limit;
   bool Fallback;
   bool MaybeSuboptimal;
-  bool _EnableFallback = false;
 
   // Live ranges pass through a number of stages as we try to allocate them.
   // Some of the stages may also create new live ranges:

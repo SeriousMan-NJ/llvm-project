@@ -155,11 +155,6 @@ EnableFallback("enable-fallback",
     cl::init(false), cl::Hidden);
 
 static cl::opt<bool>
-WriteStat("write-stat",
-    cl::desc("Write stat"),
-    cl::init(true), cl::Hidden);
-
-static cl::opt<bool>
 OnlyMaybeSuboptimal("only-maybe-suboptimal",
     cl::desc("Only maybe suboptimal"),
     cl::init(false), cl::Hidden);
@@ -209,9 +204,6 @@ class RAGreedy : public MachineFunctionPass,
   using PQueue = std::priority_queue<std::pair<unsigned, unsigned>>;
   using SmallLISet = SmallPtrSet<LiveInterval *, 4>;
   using SmallVirtRegSet = SmallSet<Register, 16>;
-
-  // context
-  MachineFunction *MF;
 
   // Shortcuts to some useful interface.
   const TargetInstrInfo *TII;
@@ -643,7 +635,6 @@ private:
   }
 
   float calcPotentialSpillCosts() override;
-  void writeStat();
   // Helper for spilling all live virtual registers currently unified under preg
   // that interfere with the most recently queried lvr.  Return true if spilling
   // was successful, and append any new spilled/split intervals to splitLVRs.
@@ -3232,6 +3223,7 @@ bool RAGreedy::spillInterferences(LiveInterval &VirtReg, MCRegister PhysReg,
 }
 
 static bool isMaybeSuboptimal(std::string filename) {
+  return true;
   if (!OnlyMaybeSuboptimal) return true;
 
   std::ifstream f(filename);
@@ -3263,13 +3255,13 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
       AllocationOrder::create(VirtReg.reg(), *VRM, RegClassInfo, Matrix);
 
   std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
-  if (EnableFallback && UsePBQP && isMaybeSuboptimal(filename) && Round > Limit) {
+  if (MF->getFunction().isCloned && Round > Limit) {
     errs() << "FALLBACK to PBQP!!!\n";
     (new RegAllocPBQP())->runOnMachineFunctionCustom(*MF, *VRM, *LIS, Loops, MBFI, &spiller(), VRegsToAlloc, EmptyIntervalVRegs);
     MCRegister Reg;
     Reg.setPBQP();
     return Reg;
-  } else if (EnableFallback && isMaybeSuboptimal(filename) && Round > Limit) {
+  } else if (false && MF->getFunction().isCloned && Round > Limit) {
     errs() << "BASIC!\n";
     Fallback = true;
 
@@ -3525,29 +3517,6 @@ float RAGreedy::calcPotentialSpillCosts() {
   return TotalSpillCost + SpilledCost + SE->getSplitCost() / SplitCostFactor;
 }
 
-void RAGreedy::writeStat() {
-  std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
-  std::ofstream f(filename);
-
-  f << MinRound << "\n";
-  f << Round << "\n";
-  f << MinSpillCost << "\n";
-  f << calcPotentialSpillCosts() << "\n";
-  if (OnlyThreshold) {
-    if (Threshold == 10U) f << (MinSpillCost < calcPotentialSpillCosts() * Hysteresis) << "\n";
-    else f << (MinSpillCost < calcPotentialSpillCosts() * 0.1 * Threshold) << "\n";
-  } else {
-    f << (MaybeSuboptimal &&
-        ((MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 100) ||
-        (MinSpillCost < calcPotentialSpillCosts() * 0.80 && 50 <= calcPotentialSpillCosts() && calcPotentialSpillCosts() < 100))) << "\n";
-  }
-  f << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
-  f << MF->getName().str() << "\n";
-  f << SplitCanCauseEvictionChain << "\n";
-  f << SplitCanCauseLocalSpill << "\n";
-  f.close();
-}
-
 void RAGreedy::maybeSuboptimal(MachineLoop* L, LoopInfoCustom *I) {
   bool isInnermost = L->isInnermost();
   if (isInnermost) {
@@ -3701,27 +3670,18 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   SplitCanCauseLocalSpill = 0;
   checkSplit = false;
   behaviourLevel = 0;
-  _EnableFallback = EnableFallback;
 
   maybeSuboptimal();
 
-{
-  // NamedRegionTimer T("regalloc", "Register allocation", TimerGroupName, TimerGroupDescription, true);
   allocatePhysRegs();
-}
 
   if (!isPBQP)
     tryHintsRecoloring();
 
   if (VerifyEnabled)
     MF->verify(this, "Before post optimization");
-{
-  // NamedRegionTimer T("post-optimization", "Post Optimization", TimerGroupName, TimerGroupDescription, true);
-  postOptimization();
-}
 
-  if (WriteStat)
-    writeStat();
+  postOptimization();
 
   printCost(-1);
 
@@ -3734,8 +3694,16 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   if (WriteBehaviourLevel)
     setBehaviourLevel();
 
+  if (MaybeSuboptimal &&
+        ((MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 100) ||
+        (MinSpillCost < calcPotentialSpillCosts() * 0.80 && 50 <= calcPotentialSpillCosts() && calcPotentialSpillCosts() < 100))) {
+    if (!MF->getFunction().isCloned) {
+      MF->getFunction().MinRound = MinRound;
+      MF->getFunction().skip = true;
+    }
+  }
+
   releaseMemory();
 
-  _EnableFallback = false;
   return true;
 }

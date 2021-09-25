@@ -32,8 +32,12 @@
 #include "llvm/Support/TimeProfiler.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include <algorithm>
 #include <unordered_set>
+#include <set>
+#include <vector>
 using namespace llvm;
 
 // See PassManagers.h for Pass Manager infrastructure overview.
@@ -1396,10 +1400,32 @@ void FPPassManager::dumpPassStructure(unsigned Offset) {
   }
 }
 
+/// Goes over OldF calls and replaces them with a call to NewF
+static void replaceFunctionCalls(Function &OldF, Function &NewF,
+                                 const std::set<int> &ArgIndexesToKeep) {
+  const auto &Users = OldF.users();
+  for (auto I = Users.begin(), E = Users.end(); I != E; )
+    if (auto *CI = dyn_cast<CallInst>(*I++)) {
+      SmallVector<Value *, 8> Args;
+      for (auto ArgI = CI->arg_begin(), E = CI->arg_end(); ArgI != E; ++ArgI)
+        if (ArgIndexesToKeep.count(ArgI - CI->arg_begin()))
+          Args.push_back(*ArgI);
+
+      CallInst *NewCI = CallInst::Create(&NewF, Args);
+      NewCI->setCallingConv(NewF.getCallingConv());
+      if (!CI->use_empty())
+        CI->replaceAllUsesWith(NewCI);
+      ReplaceInstWithInst(CI, NewCI);
+    }
+}
+
 /// Execute all of the passes scheduled for execution by invoking
 /// runOnFunction method.  Keep track of whether any of the passes modifies
 /// the function, and if so, return true.
 bool FPPassManager::runOnFunction(Function &F) {
+  // if (F.skip)
+  //   return false;
+
   if (F.isDeclaration())
     return false;
 
@@ -1419,6 +1445,7 @@ bool FPPassManager::runOnFunction(Function &F) {
 
   llvm::TimeTraceScope FunctionScope("OptFunction", F.getName());
 
+  unsigned chpt;
   for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index) {
     FunctionPass *FP = getContainedPass(Index);
     bool LocalChanged = false;
@@ -1436,7 +1463,31 @@ bool FPPassManager::runOnFunction(Function &F) {
 #ifdef EXPENSIVE_CHECKS
       uint64_t RefHash = StructuralHash(F);
 #endif
-      LocalChanged |= FP->runOnFunction(F);
+      // if (!F.skip)
+        LocalChanged |= FP->runOnFunction(F);
+      // errs() << FP->getPassName() << "\n";
+      if (FP->getPassName() == "Greedy Register Allocator") {
+        chpt = Index;
+        if (F.skip) {
+          ValueToValueMapTy VMap;
+          auto *ClonedFunc = CloneFunction(&F, VMap);
+          // In order to preserve function order, we move Clone after old Function
+          ClonedFunc->removeFromParent();
+          M.getFunctionList().insertAfter(F.getIterator(), ClonedFunc);
+
+          // Rename Cloned Function to Old's name
+          std::string FName = std::string(F.getName());
+          // F.replaceAllUsesWith(ConstantExpr::getBitCast(ClonedFunc, F.getType()));
+          F.setName("test__ywshin__" + std::to_string(random()));
+          // F.skip = true;
+          // F.eraseFromParent();
+          ClonedFunc->setName(FName);
+          ClonedFunc->isCloned = true;
+          ClonedFunc->MinRound = F.MinRound;
+          errs() << "YWSHIN!!!\n";
+          errs() << ClonedFunc->MinRound << "\n";
+        }
+      }
 
 #if defined(EXPENSIVE_CHECKS) && !defined(NDEBUG)
       if (!LocalChanged && (RefHash != StructuralHash(F))) {
@@ -1473,6 +1524,9 @@ bool FPPassManager::runOnFunction(Function &F) {
       removeNotPreservedAnalysis(FP);
     recordAvailableAnalysis(FP);
     removeDeadPasses(FP, F.getName(), ON_FUNCTION_MSG);
+
+    // if (F.skip)
+    //   break;
   }
 
   return Changed;
@@ -1483,6 +1537,17 @@ bool FPPassManager::runOnModule(Module &M) {
 
   for (Function &F : M)
     Changed |= runOnFunction(F);
+
+  // std::vector<Function*> DP;
+
+  // for (Function &F : M) {
+  //   if (F.skip)
+  //     DP.push_back(&F);
+  // }
+  // for (auto F : DP)
+  //   F->eraseFromParent();
+
+  // errs() << "TEST!!!\n";
 
   return Changed;
 }

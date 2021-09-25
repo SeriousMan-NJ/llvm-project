@@ -69,6 +69,10 @@ public:
   using arg_iterator = Argument *;
   using const_arg_iterator = const Argument *;
 
+  bool isCloned = false;
+  bool skip = false;
+  int MinRound;
+
 private:
   // Important things that make up a function!
   BasicBlockListType BasicBlocks;         ///< The basic blocks

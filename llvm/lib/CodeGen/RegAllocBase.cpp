@@ -106,26 +106,15 @@ void RegAllocBase::seedLiveRegs() {
 }
 
 int RegAllocBase::getRound(std::string filename) {
-  if (!_EnableFallback) return __INT_MAX__;
-
-  if (filename.find("mkl-dnn/tests/gtests") != std::string::npos) return __INT_MAX__;
-
-  // return __INT_MAX__;
-  std::ifstream f(filename);
-  if (f.good()) {
-    // errs() << "GOOD\n";
-    std::string r;
-    getline(f, r);
-    f.close();
-    return std::stoi(r);
-  } else {
-    errs() << "BAD\n";
-    return __INT_MAX__;
+  if (MF->getFunction().isCloned) {
+    return MF->getFunction().MinRound;
   }
+
+  return __INT_MAX__;
 }
 
 bool RegAllocBase::isSuboptimal(std::string filename) {
-  if (!_EnableFallback) return false;
+  return false;
 
   std::ifstream f(filename);
   if (f.good()) {
