@@ -717,7 +717,7 @@ void RegAllocPBQP::postOptimization(Spiller &VRegSpiller, LiveIntervals &LIS) {
 }
 
 bool RegAllocPBQP::runOnMachineFunction(MachineFunction &MF) {
-  errs() << "[PBQP REGISTER ALLOCATION]\n";
+  // errs() << "[PBQP REGISTER ALLOCATION]\n";
   LiveIntervals &LIS = getAnalysis<LiveIntervals>();
   MachineBlockFrequencyInfo &MBFI =
     getAnalysis<MachineBlockFrequencyInfo>();
@@ -811,7 +811,7 @@ bool RegAllocPBQP::runOnMachineFunction(MachineFunction &MF) {
 }
 
 bool RegAllocPBQP::runOnMachineFunctionCustom(MachineFunction &MF, VirtRegMap &VRM, LiveIntervals &LIS, MachineLoopInfo* Loops, MachineBlockFrequencyInfo* MBFI, Spiller* VRegSpiller, RegSet vRegsToAlloc, RegSet emptyIntervalVRegs) {
-  errs() << "[PBQP REGISTER ALLOCATION]\n";
+  // errs() << "[PBQP REGISTER ALLOCATION]\n";
   vRegsToAlloc = vRegsToAlloc;
   EmptyIntervalVRegs = emptyIntervalVRegs;
 

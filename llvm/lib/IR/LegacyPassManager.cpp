@@ -1401,15 +1401,13 @@ void FPPassManager::dumpPassStructure(unsigned Offset) {
 }
 
 /// Goes over OldF calls and replaces them with a call to NewF
-static void replaceFunctionCalls(Function &OldF, Function &NewF,
-                                 const std::set<int> &ArgIndexesToKeep) {
+static void replaceFunctionCalls(Function &OldF, Function &NewF) {
   const auto &Users = OldF.users();
   for (auto I = Users.begin(), E = Users.end(); I != E; )
     if (auto *CI = dyn_cast<CallInst>(*I++)) {
       SmallVector<Value *, 8> Args;
       for (auto ArgI = CI->arg_begin(), E = CI->arg_end(); ArgI != E; ++ArgI)
-        if (ArgIndexesToKeep.count(ArgI - CI->arg_begin()))
-          Args.push_back(*ArgI);
+        Args.push_back(*ArgI);
 
       CallInst *NewCI = CallInst::Create(&NewF, Args);
       NewCI->setCallingConv(NewF.getCallingConv());
@@ -1446,6 +1444,7 @@ bool FPPassManager::runOnFunction(Function &F) {
   llvm::TimeTraceScope FunctionScope("OptFunction", F.getName());
 
   unsigned chpt;
+  std::string FName = std::string(F.getName());
   for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index) {
     FunctionPass *FP = getContainedPass(Index);
     bool LocalChanged = false;
@@ -1463,7 +1462,7 @@ bool FPPassManager::runOnFunction(Function &F) {
 #ifdef EXPENSIVE_CHECKS
       uint64_t RefHash = StructuralHash(F);
 #endif
-      // if (!F.skip)
+      if (!F.skip)
         LocalChanged |= FP->runOnFunction(F);
       // errs() << FP->getPassName() << "\n";
       if (FP->getPassName() == "Greedy Register Allocator") {
@@ -1471,21 +1470,22 @@ bool FPPassManager::runOnFunction(Function &F) {
         if (F.skip) {
           ValueToValueMapTy VMap;
           auto *ClonedFunc = CloneFunction(&F, VMap);
+          replaceFunctionCalls(F, *ClonedFunc);
           // In order to preserve function order, we move Clone after old Function
           ClonedFunc->removeFromParent();
           M.getFunctionList().insertAfter(F.getIterator(), ClonedFunc);
 
           // Rename Cloned Function to Old's name
-          std::string FName = std::string(F.getName());
+          // std::string FName = std::string(F.getName());
           // F.replaceAllUsesWith(ConstantExpr::getBitCast(ClonedFunc, F.getType()));
-          F.setName("test__ywshin__" + std::to_string(random()));
+          // F.setName("test__ywshin__" + std::to_string(random()));
           // F.skip = true;
           // F.eraseFromParent();
-          ClonedFunc->setName(FName);
+          ClonedFunc->takeName(&F);
           ClonedFunc->isCloned = true;
           ClonedFunc->MinRound = F.MinRound;
-          errs() << "YWSHIN!!!\n";
-          errs() << ClonedFunc->MinRound << "\n";
+          // errs() << "YWSHIN!!!\n";
+          // errs() << ClonedFunc->MinRound << "\n";
         }
       }
 

@@ -3256,7 +3256,7 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
 
   std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
   if (MF->getFunction().isCloned && Round > Limit) {
-    errs() << "FALLBACK to PBQP!!!\n";
+    // errs() << "FALLBACK to PBQP!!!\n";
     (new RegAllocPBQP())->runOnMachineFunctionCustom(*MF, *VRM, *LIS, Loops, MBFI, &spiller(), VRegsToAlloc, EmptyIntervalVRegs);
     MCRegister Reg;
     Reg.setPBQP();
@@ -3554,7 +3554,7 @@ void RAGreedy::maybeSuboptimal() {
   }
 
   // Exclude when majority of the loops are small
-  errs() << "INNER LOOPS:" << I.num_small_innermost << "," << I.num_innermost << " | " << I.num_loop_inst << "," << I.num_innermost_inst << "\n";
+  // errs() << "INNER LOOPS:" << I.num_small_innermost << "," << I.num_innermost << " | " << I.num_loop_inst << "," << I.num_innermost_inst << "\n";
 
   if (I.num_innermost_inst == 0) return;
 

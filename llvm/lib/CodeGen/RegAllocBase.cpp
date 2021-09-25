@@ -210,7 +210,7 @@ void RegAllocBase::allocatePhysRegs() {
 
   MachineFunction &mf = VRM->getMachineFunction();
   std::string filename = mf.getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(mf.getFunctionNumber()) + ".txt";
-  errs() << "FILENAME:" << filename << "\n";
+  // errs() << "FILENAME:" << filename << "\n";
 
   Limit = getRound(filename);
   // Continue assigning vregs one at a time to available physical registers.
@@ -260,7 +260,7 @@ void RegAllocBase::allocatePhysRegs() {
     VirtRegVec SplitVRegs;
     MCRegister AvailablePhysReg = selectOrSplit(*VirtReg, SplitVRegs);
     if (AvailablePhysReg.isPBQP()) {
-      errs() << "PBQP!!!\n";
+      // errs() << "PBQP!!!\n";
       isPBQP = true;
       return;
     }
