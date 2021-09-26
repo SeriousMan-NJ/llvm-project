@@ -152,7 +152,17 @@ SplitCostFactor("split-cost-factor",
 static cl::opt<bool>
 UsePBQP("use-pbqp",
         cl::desc("Use PBQP"),
+        cl::init(true), cl::Hidden);
+
+static cl::opt<bool>
+OnlyThreshold("only-threshold",
+        cl::desc("Only threshold"),
         cl::init(false), cl::Hidden);
+
+static cl::opt<unsigned>
+Threshold("threshold",
+        cl::desc("Reciprocal threshold"),
+        cl::init(8), cl::Hidden);
 
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
@@ -3077,14 +3087,17 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
       AllocationOrder::create(VirtReg.reg(), *VRM, RegClassInfo, Matrix);
 
   std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
-  if (MF->getFunction().isCloned && Round > Limit) {
+
+  bool fallback = MF->getFunction().isCloned && Round > Limit;
+  if (fallback && UsePBQP) {
     // errs() << "FALLBACK to PBQP!!!\n";
+    Fallback = true;
     (new RegAllocPBQP())->runOnMachineFunctionCustom(*MF, *VRM, *LIS, Loops, MBFI, &spiller(), VRegsToAlloc, EmptyIntervalVRegs);
     MCRegister Reg;
     Reg.setPBQP();
     return Reg;
-  } else if (false && MF->getFunction().isCloned && Round > Limit) {
-    errs() << "BASIC!\n";
+  } else if (fallback && !UsePBQP) {
+    // errs() << "BASIC!\n";
     Fallback = true;
 
     // Populate a list of physical register spill candidates.
@@ -3314,6 +3327,8 @@ void RAGreedy::reportNumberOfSplillsReloads(MachineLoop *L, unsigned &Reloads,
 }
 
 float RAGreedy::calcPotentialSpillCosts() {
+  if (MF->getFunction().isCloned) return huge_valf;
+
   float TotalSpillCost = 0.0;
   for (auto it = SpillCostMap.begin(); it != SpillCostMap.end(); it++) {
     if (it->second != huge_valf && getStage(*it->first) < RS_Done)
@@ -3351,6 +3366,8 @@ void RAGreedy::maybeSuboptimal(MachineLoop* L, LoopInfoCustom *I) {
 }
 
 void RAGreedy::maybeSuboptimal() {
+  if (OnlyThreshold) return;
+
   LoopInfoCustom I = {0, 0, 0, 0, true, 0};
 
   bool loopExist = false;
@@ -3462,13 +3479,20 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   if (!isPBQP)
     reportNumberOfSplillsReloads();
 
-  if (MaybeSuboptimal &&
-     ((MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 100) ||
-     (MinSpillCost < calcPotentialSpillCosts() * 0.80 && 50 <= calcPotentialSpillCosts() && calcPotentialSpillCosts() < 100))) {
-    if (!MF->getFunction().isCloned) {
-      MF->getFunction().MinRound = MinRound;
-      MF->getFunction().skip = true;
-    }
+  bool cond = false;
+
+  if (OnlyThreshold) {
+    if (Threshold == 10U) cond = (MinSpillCost < calcPotentialSpillCosts() * Hysteresis);
+    else cond = (MinSpillCost < calcPotentialSpillCosts() * 0.1 * Threshold);
+  } else {
+    cond = MaybeSuboptimal &&
+      ((MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 100) ||
+      (MinSpillCost < calcPotentialSpillCosts() * 0.80 && 50 <= calcPotentialSpillCosts() && calcPotentialSpillCosts() < 100));
+  }
+
+  if (cond && !MF->getFunction().isCloned) {
+    MF->getFunction().MinRound = MinRound;
+    MF->getFunction().skip = true;
   }
 
   releaseMemory();
