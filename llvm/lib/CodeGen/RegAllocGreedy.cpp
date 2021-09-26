@@ -150,6 +150,11 @@ SplitCostFactor("split-cost-factor",
     cl::init(0), cl::Hidden);
 
 static cl::opt<bool>
+UseGreedySO("use-greedy-so",
+    cl::desc("Only maybe suboptimal"),
+    cl::init(true), cl::Hidden);
+
+static cl::opt<bool>
 UsePBQP("use-pbqp",
         cl::desc("Use PBQP"),
         cl::init(true), cl::Hidden);
@@ -3490,7 +3495,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
       (MinSpillCost < calcPotentialSpillCosts() * 0.80 && 50 <= calcPotentialSpillCosts() && calcPotentialSpillCosts() < 100));
   }
 
-  if (cond && !MF->getFunction().isCloned) {
+  if (cond && !MF->getFunction().isCloned && UseGreedySO) {
     MF->getFunction().MinRound = MinRound;
     MF->getFunction().skip = true;
   }
