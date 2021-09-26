@@ -1444,6 +1444,12 @@ bool FPPassManager::runOnFunction(Function &F) {
     FunctionPass *FP = getContainedPass(Index);
     bool LocalChanged = false;
 
+    if (F.skip) {
+      removeNotPreservedAnalysis(FP);
+      removeDeadPasses(FP, F.getName(), ON_FUNCTION_MSG);
+      continue;
+    }
+
     llvm::TimeTraceScope PassScope("RunPass", FP->getPassName());
 
     dumpPassInfo(FP, EXECUTION_MSG, ON_FUNCTION_MSG, F.getName());
