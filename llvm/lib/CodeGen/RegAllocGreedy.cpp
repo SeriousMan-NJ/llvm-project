@@ -150,44 +150,9 @@ SplitCostFactor("split-cost-factor",
     cl::init(0), cl::Hidden);
 
 static cl::opt<bool>
-EnableFallback("enable-fallback",
-    cl::desc("Enable fallback to basic"),
-    cl::init(false), cl::Hidden);
-
-static cl::opt<bool>
-OnlyMaybeSuboptimal("only-maybe-suboptimal",
-    cl::desc("Only maybe suboptimal"),
-    cl::init(false), cl::Hidden);
-
-static cl::opt<unsigned>
-EvictMode("evict-mode",
-          cl::desc("Eviction mode"),
-          cl::init(0), cl::Hidden);
-
-static cl::opt<bool>
 UsePBQP("use-pbqp",
         cl::desc("Use PBQP"),
         cl::init(false), cl::Hidden);
-
-static cl::opt<bool>
-OnlyThreshold("only-threshold",
-        cl::desc("Only threshold"),
-        cl::init(false), cl::Hidden);
-
-static cl::opt<unsigned>
-Threshold("threshold",
-        cl::desc("Reciprocal threshold"),
-        cl::init(8), cl::Hidden);
-
-static cl::opt<bool>
-CheckSplit("check-split",
-           cl::desc("Skip Splitting"),
-           cl::init(false), cl::Hidden);
-
-static cl::opt<bool>
-WriteBehaviourLevel("write-behaviour-level",
-                   cl::desc("Write behaviour level"),
-                   cl::init(false), cl::Hidden);
 
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
@@ -228,50 +193,6 @@ class RAGreedy : public MachineFunctionPass,
   unsigned NextCascade;
   std::unique_ptr<VirtRegAuxInfo> VRAI;
 
-  bool checkSplit;
-  unsigned behaviourLevel;
-
-  // // Live ranges pass through a number of stages as we try to allocate them.
-  // // Some of the stages may also create new live ranges:
-  // //
-  // // - Region splitting.
-  // // - Per-block splitting.
-  // // - Local splitting.
-  // // - Spilling.
-  // //
-  // // Ranges produced by one of the stages skip the previous stages when they are
-  // // dequeued. This improves performance because we can skip interference checks
-  // // that are unlikely to give any results. It also guarantees that the live
-  // // range splitting algorithm terminates, something that is otherwise hard to
-  // // ensure.
-  // enum LiveRangeStage {
-  //   /// Newly created live range that has never been queued.
-  //   RS_New,
-
-  //   /// Only attempt assignment and eviction. Then requeue as RS_Split.
-  //   RS_Assign,
-
-  //   /// Attempt live range splitting if assignment is impossible.
-  //   RS_Split,
-
-  //   /// Attempt more aggressive live range splitting that is guaranteed to make
-  //   /// progress.  This is used for split products that may not be making
-  //   /// progress.
-  //   RS_Split2,
-
-  //   /// Live range will be spilled.  No more splitting will be attempted.
-  //   RS_Spill,
-
-
-  //   /// Live range is in memory. Because of other evictions, it might get moved
-  //   /// in a register in the end.
-  //   RS_Memory,
-
-  //   /// There is nothing more we can do to this live range.  Abort compilation
-  //   /// if it can't be assigned.
-  //   RS_Done
-  // };
-
   // Enum CutOffStage to keep a track whether the register allocation failed
   // because of the cutoffs encountered in last chance recoloring.
   // Note: This is used as bitmask. New value should be next power of 2.
@@ -292,27 +213,11 @@ class RAGreedy : public MachineFunctionPass,
   static const char *const StageName[];
 #endif
 
-  // // RegInfo - Keep additional information about each live range.
-  // struct RegInfo {
-  //   LiveRangeStage Stage = RS_New;
-
-  //   // Cascade - Eviction loop prevention. See canEvictInterference().
-  //   unsigned Cascade = 0;
-
-  //   RegInfo() = default;
-  // };
-
-  // IndexedMap<RegInfo, VirtReg2IndexFunctor> ExtraRegInfo;
-
   LiveRangeStage getStage(const LiveInterval &VirtReg) const {
     return ExtraRegInfo[VirtReg.reg()].Stage;
   }
 
   void setStage(const LiveInterval &VirtReg, LiveRangeStage Stage) {
-    if (Stage == RS_Split || Stage == RS_Split2) {
-      checkSplit = true;
-      if (behaviourLevel < 1) behaviourLevel = 1;
-    }
     ExtraRegInfo.resize(MRI->getNumVirtRegs());
     ExtraRegInfo[VirtReg.reg()].Stage = Stage;
   }
@@ -323,10 +228,6 @@ class RAGreedy : public MachineFunctionPass,
 
   template<typename Iterator>
   void setStage(Iterator Begin, Iterator End, LiveRangeStage NewStage) {
-    if (NewStage == RS_Split || NewStage == RS_Split2) {
-      checkSplit = true;
-      if (behaviourLevel < 1) behaviourLevel = 1;
-    }
     ExtraRegInfo.resize(MRI->getNumVirtRegs());
     for (;Begin != End; ++Begin) {
       Register Reg = *Begin;
@@ -653,8 +554,6 @@ private:
   /// maybe suboptimal splitting
   void maybeSuboptimal();
   void maybeSuboptimal(MachineLoop* L, LoopInfoCustom *I);
-  void doesSplitExist();
-  void setBehaviourLevel();
 };
 
 } // end anonymous namespace
@@ -739,7 +638,7 @@ bool RAGreedy::LRE_CanEraseVirtReg(Register VirtReg) {
   LiveInterval &LI = LIS->getInterval(VirtReg);
   if (VRM->hasPhys(VirtReg)) {
     Matrix->unassign(LI);
-    VRegsToAlloc.insert(LI.reg());
+    // VRegsToAlloc.insert(LI.reg());
     aboutToRemoveInterval(LI);
     return true;
   }
@@ -758,7 +657,7 @@ void RAGreedy::LRE_WillShrinkVirtReg(Register VirtReg) {
   // Register is assigned, put it back on the queue for reassignment.
   LiveInterval &LI = LIS->getInterval(VirtReg);
   Matrix->unassign(LI);
-  VRegsToAlloc.insert(LI.reg());
+  // VRegsToAlloc.insert(LI.reg());
   enqueue(&LI);
 }
 
@@ -894,7 +793,6 @@ MCRegister RAGreedy::tryAssign(LiveInterval &VirtReg,
       if (canEvictInterference(VirtReg, PhysHint, true, MaxCost,
                                FixedRegisters)) {
         evictInterference(VirtReg, PhysHint, NewVRegs);
-        printCost("try_evict");
         return PhysHint;
       }
       // Record the missed hint, we may be able to recover
@@ -912,7 +810,6 @@ MCRegister RAGreedy::tryAssign(LiveInterval &VirtReg,
   LLVM_DEBUG(dbgs() << printReg(PhysReg, TRI) << " is available at cost "
                     << Cost << '\n');
   MCRegister CheapReg = tryEvict(VirtReg, Order, NewVRegs, Cost, FixedRegisters);
-  if (CheapReg) printCost("try_evict");
   return CheapReg ? CheapReg : PhysReg;
 }
 
@@ -1052,20 +949,7 @@ bool RAGreedy::canEvictInterference(
       Cost.BrokenHints += BreaksHint;
 
       int a = Q.collectInterferingVRegs(5);
-      if (EvictMode == 0) {
-        Cost.MaxWeight = std::max(Cost.MaxWeight, Intf->weight());
-      } else if (EvictMode == 1) {
-        if (MaxCost.MaxWeight < 0) MaxCost.MaxWeight = VirtReg.weight();
-        Cost.MaxWeight += Intf->weight();
-      } else if (EvictMode == 2) {
-        if (MaxCost.MaxWeight < 0) MaxCost.MaxWeight = VirtReg.weight()*0.2*a + VirtReg.weight()*(1 - 0.2*a);
-        Cost.MaxWeight += Intf->cost()*0.2*a + Intf->weight()*(1 - 0.2*a);
-      } else if (EvictMode == 3) {
-        if (MaxCost.MaxWeight < 0) MaxCost.MaxWeight = VirtReg.weight()*0.1*a + VirtReg.weight()*(1 - 0.1*a);
-        Cost.MaxWeight += Intf->cost()*0.1*a + Intf->weight()*(1 - 0.1*a);
-      } else {
-        report_fatal_error("Unsupported eviction mode!");
-      }
+      Cost.MaxWeight = std::max(Cost.MaxWeight, Intf->weight());
       // Abort if this would be too expensive.
       if (!(Cost < MaxCost))
         return false;
@@ -1209,7 +1093,7 @@ void RAGreedy::evictInterference(LiveInterval &VirtReg, MCRegister PhysReg,
     LastEvicted.addEviction(PhysReg, VirtReg.reg(), Intf->reg());
 
     Matrix->unassign(*Intf);
-    VRegsToAlloc.insert(Intf->reg());
+    // VRegsToAlloc.insert(Intf->reg());
     assert((ExtraRegInfo[Intf->reg()].Cascade < Cascade ||
             VirtReg.isSpillable() < Intf->isSpillable()) &&
            "Cannot decrease cascade number, illegal eviction");
@@ -1873,7 +1757,6 @@ void RAGreedy::splitAroundRegion(LiveRangeEdit &LREdit,
     }
   }
 
-  printCost("region_split");
   ++NumGlobalSplits;
 
   SmallVector<unsigned, 8> IntvMap;
@@ -2129,7 +2012,6 @@ unsigned RAGreedy::tryBlockSplit(LiveInterval &VirtReg, AllocationOrder &Order,
   if (LREdit.empty())
     return 0;
 
-  printCost("block_split");
   // We did split for some blocks.
   SmallVector<unsigned, 8> IntvMap;
   SE->finish(&IntvMap);
@@ -2225,7 +2107,6 @@ RAGreedy::tryInstructionSplit(LiveInterval &VirtReg, AllocationOrder &Order,
     LLVM_DEBUG(dbgs() << "All uses were copies.\n");
     return 0;
   }
-  printCost("instruction_split");
   SmallVector<unsigned, 8> IntvMap;
   SE->finish(&IntvMap);
   DebugVars->splitRegister(VirtReg.reg(), LREdit.regs(), *LIS);
@@ -2511,7 +2392,6 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
   if (BestBefore == NumGaps)
     return 0;
 
-  printCost("local_split");
   LLVM_DEBUG(dbgs() << "Best local split range: " << Uses[BestBefore] << '-'
                     << Uses[BestAfter] << ", " << BestDiff << ", "
                     << (BestAfter - BestBefore + 1) << " instrs\n");
@@ -2561,11 +2441,6 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
   std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
   // Ranges must be Split2 or less.
   if (getStage(VirtReg) >= RS_Spill) {
-    if (VirtReg.stage) {
-      setDetailedStage(VirtReg, RS_Not_Split);
-      printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage, filename);
-      VirtReg.stage = false;
-    }
     return 0;
   }
 
@@ -2576,22 +2451,9 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
     SA->analyze(&VirtReg);
     Register PhysReg = tryLocalSplit(VirtReg, Order, NewVRegs);
     if (PhysReg || !NewVRegs.empty()) {
-      if (VirtReg.stage) {
-        setDetailedStage(VirtReg, RS_Local_Split);
-        printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage, filename);
-        VirtReg.stage = false;
-      }
       return PhysReg;
     }
-    if (tryInstructionSplit(VirtReg, Order, NewVRegs) && VirtReg.stage) {
-      setDetailedStage(VirtReg, RS_Instruction_Split);
-      printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage, filename);
-      VirtReg.stage = false;
-    } else if (VirtReg.stage) {
-      setDetailedStage(VirtReg, RS_Not_Split);
-      printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
-      VirtReg.stage = false;
-    }
+    tryInstructionSplit(VirtReg, Order, NewVRegs);
     return 0;
   }
   // NamedRegionTimer T("global_split", "Global Splitting", TimerGroupName,
@@ -2607,11 +2469,6 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
     // VirtReg has changed, so all cached queries are invalid.
     Matrix->invalidateVirtRegs();
     if (Register PhysReg = tryAssign(VirtReg, Order, NewVRegs, FixedRegisters)) {
-      if (VirtReg.stage) {
-        setDetailedStage(VirtReg, RS_Not_Split);
-        printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage, filename);
-        VirtReg.stage = false;
-      }
       return PhysReg;
     }
   }
@@ -2622,25 +2479,12 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
   if (getStage(VirtReg) < RS_Split2) {
     MCRegister PhysReg = tryRegionSplit(VirtReg, Order, NewVRegs);
     if (PhysReg || !NewVRegs.empty()) {
-      if (VirtReg.stage) {
-        setDetailedStage(VirtReg, RS_Region_Split);
-        printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage, filename);
-        VirtReg.stage = false;
-      }
       return PhysReg;
     }
   }
 
   // Then isolate blocks.
-  if (tryBlockSplit(VirtReg, Order, NewVRegs) && VirtReg.stage) {
-    setDetailedStage(VirtReg, RS_Block_Split);
-    printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage, filename);
-    VirtReg.stage = false;
-  } else if (VirtReg.stage) {
-    setDetailedStage(VirtReg, RS_Not_Split);
-    printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage, filename);
-    VirtReg.stage = false;
-  }
+  tryBlockSplit(VirtReg, Order, NewVRegs);
   return 0;
 }
 
@@ -2811,14 +2655,14 @@ unsigned RAGreedy::tryLastChanceRecoloring(LiveInterval &VirtReg,
       VirtRegToPhysReg[ItVirtReg] = VRM->getPhys(ItVirtReg);
       // unset the related struct.
       Matrix->unassign(*RC);
-      VRegsToAlloc.insert(RC->reg());
+      // VRegsToAlloc.insert(RC->reg());
     }
 
     // Do as if VirtReg was assigned to PhysReg so that the underlying
     // recoloring has the right information about the interferes and
     // available colors.
     Matrix->assign(VirtReg, PhysReg);
-    VRegsToAlloc.erase(VirtReg.reg());
+    // VRegsToAlloc.erase(VirtReg.reg());
 
     // Save the current recoloring state.
     // If we cannot recolor all the interferences, we will have to start again
@@ -2834,7 +2678,7 @@ unsigned RAGreedy::tryLastChanceRecoloring(LiveInterval &VirtReg,
       // Do not mess up with the global assignment process.
       // I.e., VirtReg must be unassigned.
       Matrix->unassign(VirtReg);
-      VRegsToAlloc.insert(VirtReg.reg());
+      // VRegsToAlloc.insert(VirtReg.reg());
       return PhysReg;
     }
 
@@ -2844,7 +2688,7 @@ unsigned RAGreedy::tryLastChanceRecoloring(LiveInterval &VirtReg,
     // The recoloring attempt failed, undo the changes.
     FixedRegisters = SaveFixedRegisters;
     Matrix->unassign(VirtReg);
-    VRegsToAlloc.insert(VirtReg.reg());
+    // VRegsToAlloc.insert(VirtReg.reg());
 
     // For a newly created vreg which is also in RecoloringCandidates,
     // don't add it to NewVRegs because its physical register will be restored
@@ -2861,11 +2705,11 @@ unsigned RAGreedy::tryLastChanceRecoloring(LiveInterval &VirtReg,
       Register ItVirtReg = RC->reg();
       if (VRM->hasPhys(ItVirtReg)) {
         Matrix->unassign(*RC);
-        VRegsToAlloc.insert(RC->reg());
+        // VRegsToAlloc.insert(RC->reg());
       }
       MCRegister ItPhysReg = VirtRegToPhysReg[ItVirtReg];
       Matrix->assign(*RC, ItPhysReg);
-      VRegsToAlloc.erase(RC->reg());
+      // VRegsToAlloc.erase(RC->reg());
     }
   }
 
@@ -2907,7 +2751,7 @@ bool RAGreedy::tryRecoloringCandidates(PQueue &RecoloringQueue,
                       << " succeeded with: " << printReg(PhysReg, TRI) << '\n');
 
     Matrix->assign(*LI, PhysReg);
-    VRegsToAlloc.erase(LI->reg());
+    // VRegsToAlloc.erase(LI->reg());
     FixedRegisters.insert(LI->reg());
   }
   return true;
@@ -3211,36 +3055,14 @@ bool RAGreedy::spillInterferences(LiveInterval &VirtReg, MCRegister PhysReg,
     // Deallocate the interfering vreg by removing it from the union.
     // A LiveInterval instance may not be in a union during modification!
     Matrix->unassign(Spill);
-    VRegsToAlloc.insert(Spill.reg());
+    // VRegsToAlloc.insert(Spill.reg());
 
     // Spill the extracted interval.
     LiveRangeEdit LRE(&Spill, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
     spiller().spill(LRE);
     SpilledCost += VirtReg.cost();
-    if (behaviourLevel < 2) behaviourLevel = 2;
   }
   return true;
-}
-
-static bool isMaybeSuboptimal(std::string filename) {
-  return true;
-  if (!OnlyMaybeSuboptimal) return true;
-
-  std::ifstream f(filename);
-  if (f.good()) {
-    std::string r;
-    getline(f, r); // MinRound
-    getline(f, r); // Round
-    getline(f, r); // spill cost
-    getline(f, r); // MinSpillCost
-    getline(f, r); // is pattern matched
-    // if (std::stod(r) > 0) errs() << "BINGO\n";
-    f.close();
-    return std::stoi(r) > 0 ? true : false;
-  } else {
-    errs() << "PASS\n";
-    return false;
-  }
 }
 
 static std::string prev_filename = "";
@@ -3305,7 +3127,6 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
     spiller().spill(LRE);
     SpilledCost += VirtReg.cost();
-    if (behaviourLevel < 2) behaviourLevel = 2;
 
     // The live virtual register requesting allocation was spilled, so tell
     // the caller not to allocate anything during this round.
@@ -3314,11 +3135,6 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
 
   if (MCRegister PhysReg =
           tryAssign(VirtReg, Order, NewVRegs, FixedRegisters)) {
-    if (VirtReg.stage && ExtraRegInfo[VirtReg.reg()].Stage == RS_Split) {
-      setDetailedStage(VirtReg, RS_Not_Split);
-      printStage(ExtraRegInfo[VirtReg.reg()].Stage, DetailedRegStageInfo[VirtReg.reg()].Stage);
-      VirtReg.stage = false;
-    }
     // If VirtReg got an assignment, the eviction info is no longer relevant.
     LastEvicted.clearEvicteeInfo(VirtReg.reg());
     // When NewVRegs is not empty, we may have made decisions such as evicting
@@ -3348,7 +3164,6 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     if (Register PhysReg =
             tryEvict(VirtReg, Order, NewVRegs, CostPerUseLimit,
                      FixedRegisters)) {
-      printCost("try_evict");
       Register Hint = MRI->getSimpleHint(VirtReg.reg());
       // If VirtReg has a hint and that hint is broken record this
       // virtual register as a recoloring candidate for broken hint.
@@ -3394,10 +3209,6 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
                                    Depth);
   }
 
-  if (VirtReg.stage) {
-    printStage(ExtraRegInfo[VirtReg.reg()].Stage, -2, filename);
-  }
-
   // Finally spill VirtReg itself.
   if ((EnableDeferredSpilling ||
        TRI->shouldUseDeferredSpillingForVirtReg(*MF, VirtReg)) &&
@@ -3413,12 +3224,9 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     // NamedRegionTimer T("spill", "Spiller", TimerGroupName,
     //                    TimerGroupDescription, true);
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
-    // errs() << "Spill\n";
-    printCost("spill");
     spiller().spill(LRE);
     setStage(NewVRegs.begin(), NewVRegs.end(), RS_Done);
     SpilledCost += VirtReg.cost();
-    if (behaviourLevel < 2) behaviourLevel = 2;
 
     // Tell LiveDebugVariables about the new ranges. Ranges not being covered by
     // the new regs are kept in LDV (still mapping to the old register), until
@@ -3511,7 +3319,7 @@ float RAGreedy::calcPotentialSpillCosts() {
     if (it->second != huge_valf && getStage(*it->first) < RS_Done)
       TotalSpillCost += it->first->cost();
   }
-  // errs() << "QUEUE:" << SpillCostMap.size() << "\n";
+
   if (SplitCostFactor <= 0)
     return TotalSpillCost + SpilledCost;
   return TotalSpillCost + SpilledCost + SE->getSplitCost() / SplitCostFactor;
@@ -3543,8 +3351,6 @@ void RAGreedy::maybeSuboptimal(MachineLoop* L, LoopInfoCustom *I) {
 }
 
 void RAGreedy::maybeSuboptimal() {
-  if (OnlyThreshold) return;
-
   LoopInfoCustom I = {0, 0, 0, 0, true, 0};
 
   bool loopExist = false;
@@ -3564,34 +3370,6 @@ void RAGreedy::maybeSuboptimal() {
       ( I.num_innermost > 30 && (float)I.num_small_innermost / I.num_innermost > 0.85 )) {
     MaybeSuboptimal = false;
   }
-}
-
-void RAGreedy::doesSplitExist() {
-  std::string filename = "/home/ywshin/llvm-test-suite/split/" + std::to_string(getpid()) + ".txt";
-  std::error_code EC;
-  raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
-  OS << checkSplit << "\n";
-  OS.flush();
-}
-
-void RAGreedy::setBehaviourLevel() {
-  std::string filename = "/home/ywshin/llvm-test-suite/level/" + std::to_string(getpid()) + ".txt";
-  std::error_code EC;
-  raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
-
-  if (MinRound < Round) behaviourLevel = 3;
-  if (MinSpillCost < calcPotentialSpillCosts() * 0.90) behaviourLevel = 4;
-
-  bool pattern = MaybeSuboptimal;
-  if (calcPotentialSpillCosts() < 100 && MinSpillCost >= calcPotentialSpillCosts() * 0.80) {
-    pattern = false;
-  }
-  pattern = pattern && MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 50;
-
-  if (pattern) behaviourLevel = 5;
-
-  OS << behaviourLevel << "\n";
-  OS.flush();
 }
 
 bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
@@ -3668,8 +3446,6 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   }
   SplitCanCauseEvictionChain = 0;
   SplitCanCauseLocalSpill = 0;
-  checkSplit = false;
-  behaviourLevel = 0;
 
   maybeSuboptimal();
 
@@ -3683,20 +3459,12 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
 
   postOptimization();
 
-  printCost(-1);
-
   if (!isPBQP)
     reportNumberOfSplillsReloads();
 
-  if (CheckSplit)
-    doesSplitExist();
-
-  if (WriteBehaviourLevel)
-    setBehaviourLevel();
-
   if (MaybeSuboptimal &&
-        ((MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 100) ||
-        (MinSpillCost < calcPotentialSpillCosts() * 0.80 && 50 <= calcPotentialSpillCosts() && calcPotentialSpillCosts() < 100))) {
+     ((MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 100) ||
+     (MinSpillCost < calcPotentialSpillCosts() * 0.80 && 50 <= calcPotentialSpillCosts() && calcPotentialSpillCosts() < 100))) {
     if (!MF->getFunction().isCloned) {
       MF->getFunction().MinRound = MinRound;
       MF->getFunction().skip = true;

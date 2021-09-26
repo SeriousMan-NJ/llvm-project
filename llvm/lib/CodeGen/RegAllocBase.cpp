@@ -56,16 +56,6 @@ const char RegAllocBase::TimerGroupName[] = "regalloc";
 const char RegAllocBase::TimerGroupDescription[] = "Register Allocation";
 bool RegAllocBase::VerifyEnabled = false;
 
-static cl::opt<bool> PrintCost(
-    "print-cost", cl::Hidden,
-    cl::desc("Print cost"),
-    cl::init(false));
-
-static cl::opt<bool> PrintStage(
-    "print-stage", cl::Hidden,
-    cl::desc("Print stage"),
-    cl::init(false));
-
 static cl::opt<bool> CheckMinRoundLimit(
     "check-minround-limit", cl::Hidden,
     cl::desc("Check MinRound Limit"),
@@ -101,7 +91,7 @@ void RegAllocBase::seedLiveRegs() {
     if (MRI->reg_nodbg_empty(Reg))
       continue;
     enqueue(&LIS->getInterval(Reg));
-    VRegsToAlloc.insert(Reg);
+    // VRegsToAlloc.insert(Reg);
   }
 }
 
@@ -113,97 +103,11 @@ int RegAllocBase::getRound(std::string filename) {
   return __INT_MAX__;
 }
 
-bool RegAllocBase::isSuboptimal(std::string filename) {
-  return false;
-
-  std::ifstream f(filename);
-  if (f.good()) {
-    std::string s1;
-    std::string s2;
-    getline(f, s1);
-    getline(f, s2);
-    f.close();
-    return std::stoi(s1) < std::stoi(s2);
-  } else {
-    return false;
-  }
-}
-
-void RegAllocBase::printCost(std::string msg) {
-  if (!PrintCost) return;
-
-  const char* filename = "/home/ywshin/cost.txt";
-  std::error_code EC;
-  raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
-
-  MachineFunction &mf = VRM->getMachineFunction();
-  std::string moduleId = mf.getFunction().getParent()->getModuleIdentifier();
-  std::string functionName = mf.getName().str();
-  std::vector<std::string> moduleIds{"df-scan.c", "lcm.c", "ldecod_src/quant.c", "ldecod_src/erc_do_i.c", "x264_src/encoder/analyse.c", "x264_src/encoder/analyse.c"};
-  std::vector<std::string> functionNames{"df_uses_record", "pre_edge_lcm", "CalculateQuant4x4Param", "ercPixConcealIMB", "x264_weight_plane_analyse", "x264_slicetype_frame_cost"};
-
-  for (int i = 0; i < moduleIds.size(); i++) {
-    if (!moduleIds[i].compare(moduleId) && !functionNames[i].compare(functionName)) {
-      OS << msg << "\n";
-    }
-  }
-  // OS << msg << "\n";
-}
-
-void RegAllocBase::printCost(float cost) {
-  if (!PrintCost) return;
-
-  const char* filename = "/home/ywshin/cost.txt";
-  std::error_code EC;
-  raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
-
-  MachineFunction &mf = VRM->getMachineFunction();
-  std::string moduleId = mf.getFunction().getParent()->getModuleIdentifier();
-  std::string functionName = mf.getName().str();
-  std::vector<std::string> moduleIds{"df-scan.c", "lcm.c", "ldecod_src/quant.c", "ldecod_src/erc_do_i.c", "x264_src/encoder/analyse.c", "x264_src/encoder/analyse.c"};
-  std::vector<std::string> functionNames{"df_uses_record", "pre_edge_lcm", "CalculateQuant4x4Param", "ercPixConcealIMB", "x264_weight_plane_analyse", "x264_slicetype_frame_cost"};
-
-  for (int i = 0; i < moduleIds.size(); i++) {
-    if (!moduleIds[i].compare(moduleId) && !functionNames[i].compare(functionName)) {
-      if (cost < 0) {
-        OS << "<END OF FUNCTION:" << functionName << "> \n";
-        return;
-      }
-      OS << cost << "\n";
-    }
-  }
-  // if (cost < 0) {
-  //   OS << "<END OF FUNCTION:" << functionName << "> \n";
-  //   return;
-  // }
-  // OS << cost << "\n";
-}
-
-void RegAllocBase::printStage(LiveRangeStage stage, int detailed_stage, std::string f) {
-  if (!PrintStage) return;
-
-  const char* filename = "/home/ywshin/stage.txt";
-  std::error_code EC;
-  raw_fd_ostream OS(filename, EC, sys::fs::OF_Append);
-
-  MachineFunction &mf = VRM->getMachineFunction();
-  std::string moduleId = mf.getFunction().getParent()->getModuleIdentifier();
-  std::string functionName = mf.getName().str();
-
-  // if (detailed_stage == -2) {
-    OS << stage << "," << detailed_stage << "," << f << "\n";
-  // } else {
-  //   OS << stage << "," << detailed_stage << "\n";
-  // }
-}
-
 // Top-level driver to manage the queue of unassigned VirtRegs and call the
 // selectOrSplit implementation.
 void RegAllocBase::allocatePhysRegs() {
   seedLiveRegs();
-  // errs() << "0:" << calcPotentialSpillCosts() << "\n";
-  printCost(calcPotentialSpillCosts());
-  // errs() << calcPotentialSpillCosts() << "\n";
+
   if (MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
     MinSpillCost = calcPotentialSpillCosts();
   }
@@ -217,17 +121,10 @@ void RegAllocBase::allocatePhysRegs() {
   // LiveRangeStage stage = RS_New;
   // LiveRangeStage detailed_stage = RS_New;
   while (LiveInterval *VirtReg = dequeue()) {
-    printCost("dequeue");
-    printCost(calcPotentialSpillCosts());
     assert(!VRM->hasPhys(VirtReg->reg()) && "Register already assigned");
     Round++;
     if (!Fallback && MinRound > Limit && CheckMinRoundLimit) {
       report_fatal_error("MinRound has passed Limit");
-    }
-
-    if (Round == Limit && isSuboptimal(filename)) {
-      printStage(ExtraRegInfo[VirtReg->reg()].Stage, -1, filename);
-      VirtReg->stage = true;
     }
 
     // Unused registers can appear when the spiller coalesces snippets.
@@ -235,13 +132,11 @@ void RegAllocBase::allocatePhysRegs() {
       LLVM_DEBUG(dbgs() << "Dropping unused " << *VirtReg << '\n');
       aboutToRemoveInterval(*VirtReg);
       LIS->removeInterval(VirtReg->reg());
-      // errs() << "1:" << calcPotentialSpillCosts() << "\n";
+
       if (!Fallback && MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
         MinSpillCost = calcPotentialSpillCosts();
         MinRound = Round;
       }
-      printCost(calcPotentialSpillCosts());
-      // errs() << calcPotentialSpillCosts() << "\n";
       continue;
     }
 
@@ -260,11 +155,9 @@ void RegAllocBase::allocatePhysRegs() {
     VirtRegVec SplitVRegs;
     MCRegister AvailablePhysReg = selectOrSplit(*VirtReg, SplitVRegs);
     if (AvailablePhysReg.isPBQP()) {
-      // errs() << "PBQP!!!\n";
       isPBQP = true;
       return;
     }
-    VirtReg->stage = false;
 
     if (AvailablePhysReg == ~0u) {
       // selectOrSplit failed to find a register!
@@ -295,24 +188,17 @@ void RegAllocBase::allocatePhysRegs() {
 
       // Keep going after reporting the error.
       VRM->assignVirt2Phys(VirtReg->reg(), AllocOrder.front());
-      // errs() << "2:" << calcPotentialSpillCosts() << "\n";
       if (!Fallback && MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
         MinSpillCost = calcPotentialSpillCosts();
         MinRound = Round;
       }
-      printCost(calcPotentialSpillCosts());
-      // errs() << calcPotentialSpillCosts() << "\n";
       continue;
     }
 
     if (AvailablePhysReg) {
-      printCost("assign");
-      printCost(calcPotentialSpillCosts());
       Matrix->assign(*VirtReg, AvailablePhysReg);
-      VRegsToAlloc.erase(VirtReg->reg());
+      // VRegsToAlloc.erase(VirtReg->reg());
     }
-
-    if (SplitVRegs.size() > 0) printCost(calcPotentialSpillCosts());
 
     for (Register Reg : SplitVRegs) {
       assert(LIS->hasInterval(Reg));
@@ -324,38 +210,23 @@ void RegAllocBase::allocatePhysRegs() {
         LLVM_DEBUG(dbgs() << "not queueing unused  " << *SplitVirtReg << '\n');
         aboutToRemoveInterval(*SplitVirtReg);
         LIS->removeInterval(SplitVirtReg->reg());
-        // errs() << "3:" << calcPotentialSpillCosts() << "\n";
         continue;
       }
       LLVM_DEBUG(dbgs() << "queuing new interval: " << *SplitVirtReg << "\n");
       assert(Register::isVirtualRegister(SplitVirtReg->reg()) &&
              "expect split value in virtual register");
       enqueue(SplitVirtReg);
-      // errs() << "s:" << calcPotentialSpillCosts() << "\n";
       ++NumNewQueued;
     }
-    // errs() << "4:" << calcPotentialSpillCosts() << "\n";
     if (!Fallback && MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
       MinSpillCost = calcPotentialSpillCosts();
       MinRound = Round;
     }
-    printCost("enqueue");
-    printCost(calcPotentialSpillCosts());
-    // errs() << calcPotentialSpillCosts() << "\n";
   }
-  // errs() << "5:" << calcPotentialSpillCosts() << "\n";
   if (!Fallback && MinSpillCost >= calcPotentialSpillCosts() * Hysteresis) {
     MinSpillCost = calcPotentialSpillCosts();
     MinRound = Round;
   }
-
-  if (MinSpillCost * Hysteresis > calcPotentialSpillCosts()) {
-    errs() << "XXXXX:" << MinSpillCost << "\n";
-    errs() << "XXXXX:" << calcPotentialSpillCosts() << "\n";
-    // report_fatal_error("MinSpillCost * Hysteresis > calcPotentialSpillCosts() at the end of register allocation");
-  }
-  // printCost(calcPotentialSpillCosts());
-  // errs() << calcPotentialSpillCosts() << "\n";
 }
 
 void RegAllocBase::postOptimization() {

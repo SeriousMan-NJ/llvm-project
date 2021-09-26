@@ -1421,9 +1421,6 @@ static void replaceFunctionCalls(Function &OldF, Function &NewF) {
 /// runOnFunction method.  Keep track of whether any of the passes modifies
 /// the function, and if so, return true.
 bool FPPassManager::runOnFunction(Function &F) {
-  // if (F.skip)
-  //   return false;
-
   if (F.isDeclaration())
     return false;
 
@@ -1443,8 +1440,6 @@ bool FPPassManager::runOnFunction(Function &F) {
 
   llvm::TimeTraceScope FunctionScope("OptFunction", F.getName());
 
-  unsigned chpt;
-  std::string FName = std::string(F.getName());
   for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index) {
     FunctionPass *FP = getContainedPass(Index);
     bool LocalChanged = false;
@@ -1464,9 +1459,8 @@ bool FPPassManager::runOnFunction(Function &F) {
 #endif
       if (!F.skip)
         LocalChanged |= FP->runOnFunction(F);
-      // errs() << FP->getPassName() << "\n";
+
       if (FP->getPassName() == "Greedy Register Allocator") {
-        chpt = Index;
         if (F.skip) {
           ValueToValueMapTy VMap;
           auto *ClonedFunc = CloneFunction(&F, VMap);
@@ -1474,18 +1468,10 @@ bool FPPassManager::runOnFunction(Function &F) {
           // In order to preserve function order, we move Clone after old Function
           ClonedFunc->removeFromParent();
           M.getFunctionList().insertAfter(F.getIterator(), ClonedFunc);
-
-          // Rename Cloned Function to Old's name
-          // std::string FName = std::string(F.getName());
           F.replaceAllUsesWith(ConstantExpr::getBitCast(ClonedFunc, F.getType()));
-          // F.setName("test__ywshin__" + std::to_string(random()));
-          // F.skip = true;
-          // F.eraseFromParent();
           ClonedFunc->takeName(&F);
           ClonedFunc->isCloned = true;
           ClonedFunc->MinRound = F.MinRound;
-          // errs() << "YWSHIN!!!\n";
-          // errs() << ClonedFunc->MinRound << "\n";
         }
       }
 
@@ -1524,9 +1510,6 @@ bool FPPassManager::runOnFunction(Function &F) {
       removeNotPreservedAnalysis(FP);
     recordAvailableAnalysis(FP);
     removeDeadPasses(FP, F.getName(), ON_FUNCTION_MSG);
-
-    // if (F.skip)
-    //   break;
   }
 
   return Changed;
@@ -1546,8 +1529,6 @@ bool FPPassManager::runOnModule(Module &M) {
   // }
   // for (auto F : DP)
   //   F->eraseFromParent();
-
-  // errs() << "TEST!!!\n";
 
   return Changed;
 }

@@ -189,10 +189,6 @@ protected:
   IndexedMap<RegInfo, VirtReg2IndexFunctor> ExtraRegInfo;
   IndexedMap<RegInfo, VirtReg2IndexFunctor> DetailedRegStageInfo;
 
-  void printCost(float cost);
-  void printCost(std::string msg);
-  void printStage(LiveRangeStage stage, int detailed_stage, std::string f="");
-
 public:
   /// VerifyEnabled - True when -verify-regalloc is given.
   static bool VerifyEnabled;
