@@ -1477,7 +1477,7 @@ bool FPPassManager::runOnFunction(Function &F) {
 
           // Rename Cloned Function to Old's name
           // std::string FName = std::string(F.getName());
-          // F.replaceAllUsesWith(ConstantExpr::getBitCast(ClonedFunc, F.getType()));
+          F.replaceAllUsesWith(ConstantExpr::getBitCast(ClonedFunc, F.getType()));
           // F.setName("test__ywshin__" + std::to_string(random()));
           // F.skip = true;
           // F.eraseFromParent();
