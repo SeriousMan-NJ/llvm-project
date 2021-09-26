@@ -151,7 +151,7 @@ SplitCostFactor("split-cost-factor",
 
 static cl::opt<bool>
 UseGreedySO("use-greedy-so",
-    cl::desc("Only maybe suboptimal"),
+    cl::desc("Use Greedy-SO"),
     cl::init(true), cl::Hidden);
 
 static cl::opt<bool>
