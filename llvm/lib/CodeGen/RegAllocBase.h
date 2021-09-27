@@ -39,6 +39,9 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/CodeGen/RegisterClassInfo.h"
 #include "llvm/ADT/IndexedMap.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/IR/Function.h"
+#include "llvm/CodeGen/MachineFunction.h"
 
 namespace llvm {
 
@@ -185,6 +188,14 @@ protected:
 
     RegInfo() = default;
   };
+
+  raw_ostream &yw() {
+    if (MF->getFunction().isCloned)
+      errs() << "[CLONE] ";
+
+    static raw_fd_ostream S(2, false, true);
+    return S;
+  }
 
   IndexedMap<RegInfo, VirtReg2IndexFunctor> ExtraRegInfo;
   IndexedMap<RegInfo, VirtReg2IndexFunctor> DetailedRegStageInfo;

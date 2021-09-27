@@ -90,7 +90,7 @@ public:
 
   /// Perform register allocation
   bool runOnMachineFunction(MachineFunction &MF) override;
-  bool runOnMachineFunctionCustom(MachineFunction &MF, VirtRegMap &VRM, LiveIntervals &LIS, MachineLoopInfo* Loops, MachineBlockFrequencyInfo* MBFI, Spiller* VRegSpiller, RegSet vRegsToAlloc, RegSet emptyIntervalVRegs);
+  bool runOnMachineFunctionCustom(MachineFunction &MF, VirtRegMap &VRM, LiveIntervals &LIS, MachineLoopInfo* Loops, MachineBlockFrequencyInfo* MBFI, Spiller* VRegSpiller, RegSet vRegsToAlloc, RegSet emptyIntervalVRegs, std::set<const LiveInterval*> created, std::set<const LiveInterval*> spilled);
 
   MachineFunctionProperties getRequiredProperties() const override {
     return MachineFunctionProperties().set(
@@ -108,6 +108,7 @@ private:
   char *customPassID;
 
   RegSet VRegsToAlloc, EmptyIntervalVRegs, VRegsAllocated;
+  std::set<const LiveInterval*> Created, Spilled;
 
   /// Inst which is a def of an original reg and whose defs are already all
   /// dead after remat is saved in DeadRemats. The deletion of such inst is

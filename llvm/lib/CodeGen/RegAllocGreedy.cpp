@@ -152,7 +152,7 @@ SplitCostFactor("split-cost-factor",
 static cl::opt<bool>
 UseGreedySO("use-greedy-so",
     cl::desc("Use Greedy-SO"),
-    cl::init(true), cl::Hidden);
+    cl::init(false), cl::Hidden);
 
 static cl::opt<bool>
 UsePBQP("use-pbqp",
@@ -399,6 +399,9 @@ class RAGreedy : public MachineFunctionPass,
 
   unsigned SplitCanCauseEvictionChain;
   unsigned SplitCanCauseLocalSpill;
+
+  std::set<const LiveInterval*> Created;
+  std::set<const LiveInterval*> Spilled;
 
 public:
   RAGreedy();
@@ -1099,6 +1102,10 @@ void RAGreedy::evictInterference(LiveInterval &VirtReg, MCRegister PhysReg,
     Intfs.append(IVR.begin(), IVR.end());
   }
 
+  if (Created.find(&VirtReg) != Created.end())
+    yw() << "(EVICT) P: " << VirtReg << " ( " << VirtReg.cost() << " )\n";
+
+  LiveInterval* Heaviest = nullptr;
   // Evict them second. This will invalidate the queries.
   for (LiveInterval *Intf : Intfs) {
     // The same VirtReg may be present in multiple RegUnits. Skip duplicates.
@@ -1116,7 +1123,20 @@ void RAGreedy::evictInterference(LiveInterval &VirtReg, MCRegister PhysReg,
     ++NumEvicted;
     // errs() << "Evict\n";
     NewVRegs.push_back(Intf->reg());
+
+    if (Heaviest == nullptr || Heaviest->weight() < Intf->weight())
+      Heaviest = Intf;
+
+    if (Created.find(&VirtReg) != Created.end()) {
+      Created.insert(Intf);
+      yw() << "(EVICT) C: " << *Intf << " ( " << Intf->cost() << " )\n";
+    }
   }
+  // if (Created.find(&VirtReg) != Created.end())
+  //   Created.insert(Heaviest);
+
+  if (Created.find(&VirtReg) != Created.end())
+    Created.erase(&VirtReg);
 }
 
 /// Returns true if the given \p PhysReg is a callee saved register and has not
@@ -1777,6 +1797,8 @@ void RAGreedy::splitAroundRegion(LiveRangeEdit &LREdit,
   SmallVector<unsigned, 8> IntvMap;
   SE->finish(&IntvMap);
   DebugVars->splitRegister(Reg, LREdit.regs(), *LIS);
+  yw() << "P: " << SA->getParent() << " ( " << SA->getParent().cost() << " )\n";
+  Created.erase(&SA->getParent());
 
   ExtraRegInfo.resize(MRI->getNumVirtRegs());
   unsigned OrigBlocks = SA->getNumLiveBlocks();
@@ -1788,6 +1810,9 @@ void RAGreedy::splitAroundRegion(LiveRangeEdit &LREdit,
   // - DCE leftovers should go back on the queue.
   for (unsigned I = 0, E = LREdit.size(); I != E; ++I) {
     LiveInterval &Reg = LIS->getInterval(LREdit.get(I));
+
+    yw() << "C: " << Reg << " ( " << Reg.cost() << " )\n";
+    Created.insert(&Reg);
 
     // Ignore old intervals from DCE.
     if (getStage(Reg) != RS_New)
@@ -2033,6 +2058,8 @@ unsigned RAGreedy::tryBlockSplit(LiveInterval &VirtReg, AllocationOrder &Order,
 
   // Tell LiveDebugVariables about the new ranges.
   DebugVars->splitRegister(Reg, LREdit.regs(), *LIS);
+  yw() << "(BLOCK) P: " << SA->getParent() << " ( " << SA->getParent().cost() << " )\n";
+  Created.erase(&SA->getParent());
 
   ExtraRegInfo.resize(MRI->getNumVirtRegs());
 
@@ -2040,6 +2067,8 @@ unsigned RAGreedy::tryBlockSplit(LiveInterval &VirtReg, AllocationOrder &Order,
   // goes straight to spilling, the new local ranges get to stay RS_New.
   for (unsigned I = 0, E = LREdit.size(); I != E; ++I) {
     LiveInterval &LI = LIS->getInterval(LREdit.get(I));
+    yw() << "(BLOCK) C: " << LI << " ( " << LI.cost() << " )\n";
+    Created.insert(&LI);
     if (getStage(LI) == RS_New && IntvMap[I] == 0)
       setStage(LI, RS_Spill);
   }
@@ -2126,6 +2155,14 @@ RAGreedy::tryInstructionSplit(LiveInterval &VirtReg, AllocationOrder &Order,
   SE->finish(&IntvMap);
   DebugVars->splitRegister(VirtReg.reg(), LREdit.regs(), *LIS);
   ExtraRegInfo.resize(MRI->getNumVirtRegs());
+  yw() << "(INST) P: " << SA->getParent() << " ( " << SA->getParent().cost() << " )\n";
+  Created.erase(&SA->getParent());
+
+  for (unsigned I = 0, E = LREdit.size(); I != E; ++I) {
+    LiveInterval &Reg = LIS->getInterval(LREdit.get(I));
+    yw() << "(INST) C: " << Reg << " ( " << Reg.cost() << " )\n";
+    Created.insert(&Reg);
+  }
 
   // Assign all new registers to RS_Spill. This was the last chance.
   setStage(LREdit.begin(), LREdit.end(), RS_Spill);
@@ -2420,7 +2457,14 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
   SE->useIntv(SegStart, SegStop);
   SmallVector<unsigned, 8> IntvMap;
   SE->finish(&IntvMap);
+  yw() << "(LOCAL) P: " << SA->getParent() << " ( " << SA->getParent().cost() << " )\n";
+  Created.erase(&SA->getParent());
   DebugVars->splitRegister(VirtReg.reg(), LREdit.regs(), *LIS);
+  for (unsigned I = 0, E = LREdit.size(); I != E; ++I) {
+    LiveInterval &Reg = LIS->getInterval(LREdit.get(I));
+    yw() << "(INST) C: " << Reg << " ( " << Reg.cost() << " )\n";
+    Created.insert(&Reg);
+  }
 
   // If the new range has the same number of instructions as before, mark it as
   // RS_Split2 so the next split will be forced to make progress. Otherwise,
@@ -3097,7 +3141,7 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
   if (fallback && UsePBQP) {
     // errs() << "FALLBACK to PBQP!!!\n";
     Fallback = true;
-    (new RegAllocPBQP())->runOnMachineFunctionCustom(*MF, *VRM, *LIS, Loops, MBFI, &spiller(), VRegsToAlloc, EmptyIntervalVRegs);
+    (new RegAllocPBQP())->runOnMachineFunctionCustom(*MF, *VRM, *LIS, Loops, MBFI, &spiller(), VRegsToAlloc, EmptyIntervalVRegs, Created, Spilled);
     MCRegister Reg;
     Reg.setPBQP();
     return Reg;
@@ -3242,7 +3286,12 @@ MCRegister RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     // NamedRegionTimer T("spill", "Spiller", TimerGroupName,
     //                    TimerGroupDescription, true);
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
+    yw() << "(SPILL) P: " << VirtReg << " ( " << VirtReg.cost() << " )\n";
     spiller().spill(LRE);
+    if (Created.find(&VirtReg) != Created.end()) {
+      Created.erase(&VirtReg);
+      Spilled.insert(&VirtReg);
+    }
     setStage(NewVRegs.begin(), NewVRegs.end(), RS_Done);
     SpilledCost += VirtReg.cost();
 
@@ -3469,6 +3518,9 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   SplitCanCauseEvictionChain = 0;
   SplitCanCauseLocalSpill = 0;
 
+  Created.clear();
+  Spilled.clear();
+
   maybeSuboptimal();
 
   allocatePhysRegs();
@@ -3499,6 +3551,14 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
     MF->getFunction().MinRound = MinRound;
     MF->getFunction().skip = true;
   }
+
+  yw() << "CREATED INTERVALS:\n";
+  for (auto LI : Created)
+    yw() << *LI << " ( " << LI->cost() << " )\n";
+  yw() << "\n";
+  yw() << "SPILLED INTERVALS:\n";
+  for (auto LI : Spilled)
+    yw() << *LI << " ( " << LI->cost() << " )\n";
 
   releaseMemory();
 

@@ -617,6 +617,9 @@ void RegAllocPBQP::spillVReg(Register VReg,
                              SmallVectorImpl<Register> &NewIntervals,
                              MachineFunction &MF, LiveIntervals &LIS,
                              VirtRegMap &VRM, Spiller &VRegSpiller) {
+  Created.erase(&LIS.getInterval(VReg));
+  Spilled.insert(&LIS.getInterval(VReg));
+  errs() << "OTHER: " << LIS.getInterval(VReg) << "\n";
   VRegsToAlloc.erase(VReg);
   LiveRangeEdit LRE(&LIS.getInterval(VReg), NewIntervals, MF, LIS, &VRM,
                     nullptr, &DeadRemats);
@@ -810,10 +813,12 @@ bool RegAllocPBQP::runOnMachineFunction(MachineFunction &MF) {
   return true;
 }
 
-bool RegAllocPBQP::runOnMachineFunctionCustom(MachineFunction &MF, VirtRegMap &VRM, LiveIntervals &LIS, MachineLoopInfo* Loops, MachineBlockFrequencyInfo* MBFI, Spiller* VRegSpiller, RegSet vRegsToAlloc, RegSet emptyIntervalVRegs) {
+bool RegAllocPBQP::runOnMachineFunctionCustom(MachineFunction &MF, VirtRegMap &VRM, LiveIntervals &LIS, MachineLoopInfo* Loops, MachineBlockFrequencyInfo* MBFI, Spiller* VRegSpiller, RegSet vRegsToAlloc, RegSet emptyIntervalVRegs, std::set<const LiveInterval*> created, std::set<const LiveInterval*> spilled) {
   // errs() << "[PBQP REGISTER ALLOCATION]\n";
   vRegsToAlloc = vRegsToAlloc;
   EmptyIntervalVRegs = emptyIntervalVRegs;
+  Created = created;
+  Spilled = spilled;
 
   PBQPVirtRegAuxInfo VRAI(MF, LIS, VRM, *Loops, *MBFI);
   VRAI.calculateSpillWeightsAndHints();

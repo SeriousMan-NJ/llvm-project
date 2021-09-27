@@ -129,6 +129,7 @@ void RegAllocBase::allocatePhysRegs() {
 
     // Unused registers can appear when the spiller coalesces snippets.
     if (MRI->reg_nodbg_empty(VirtReg->reg())) {
+      yw() << "(REMOVED): " << *VirtReg << "\n";
       LLVM_DEBUG(dbgs() << "Dropping unused " << *VirtReg << '\n');
       aboutToRemoveInterval(*VirtReg);
       LIS->removeInterval(VirtReg->reg());
@@ -206,6 +207,7 @@ void RegAllocBase::allocatePhysRegs() {
       LiveInterval *SplitVirtReg = &LIS->getInterval(Reg);
       assert(!VRM->hasPhys(SplitVirtReg->reg()) && "Register already assigned");
       if (MRI->reg_nodbg_empty(SplitVirtReg->reg())) {
+        yw() << "(REMOVED): " << *SplitVirtReg << "\n";
         assert(SplitVirtReg->empty() && "Non-empty but used interval");
         LLVM_DEBUG(dbgs() << "not queueing unused  " << *SplitVirtReg << '\n');
         aboutToRemoveInterval(*SplitVirtReg);
