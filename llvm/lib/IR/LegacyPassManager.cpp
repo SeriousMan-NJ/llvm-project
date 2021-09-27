@@ -34,6 +34,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/ADT/Triple.h"
 #include <algorithm>
 #include <unordered_set>
 #include <set>
@@ -1440,11 +1441,13 @@ bool FPPassManager::runOnFunction(Function &F) {
 
   llvm::TimeTraceScope FunctionScope("OptFunction", F.getName());
 
+  Triple TT(M.getTargetTriple());
+
   for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index) {
     FunctionPass *FP = getContainedPass(Index);
     bool LocalChanged = false;
 
-    if (F.skip) {
+    if (F.skip && TT.isX86()) {
       removeNotPreservedAnalysis(FP);
       removeDeadPasses(FP, F.getName(), ON_FUNCTION_MSG);
       continue;
@@ -1463,8 +1466,7 @@ bool FPPassManager::runOnFunction(Function &F) {
 #ifdef EXPENSIVE_CHECKS
       uint64_t RefHash = StructuralHash(F);
 #endif
-      if (!F.skip)
-        LocalChanged |= FP->runOnFunction(F);
+      LocalChanged |= FP->runOnFunction(F);
 
       if (FP->getPassName() == "Greedy Register Allocator") {
         if (F.skip) {
@@ -1478,6 +1480,10 @@ bool FPPassManager::runOnFunction(Function &F) {
           ClonedFunc->takeName(&F);
           ClonedFunc->isCloned = true;
           ClonedFunc->MinRound = F.MinRound;
+
+          if (!TT.isX86()) {
+            F.setName("ywshin__" + std::to_string(random()));
+          }
         }
       }
 
