@@ -172,7 +172,7 @@ Threshold("threshold",
 static cl::opt<bool>
 WriteStat("write-stat",
     cl::desc("Write stat"),
-    cl::init(true), cl::Hidden);
+    cl::init(false), cl::Hidden);
 
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
