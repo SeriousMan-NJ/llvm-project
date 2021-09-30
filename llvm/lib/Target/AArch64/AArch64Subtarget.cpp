@@ -79,8 +79,6 @@ void AArch64Subtarget::initializeProperties() {
   // features.
   switch (ARMProcFamily) {
   case Others:
-    CacheLineSize = 64;
-    PrefFunctionLogAlignment = 6;
     break;
   case Carmel:
     CacheLineSize = 64;
