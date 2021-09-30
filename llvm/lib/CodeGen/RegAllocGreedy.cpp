@@ -169,6 +169,11 @@ Threshold("threshold",
         cl::desc("Reciprocal threshold"),
         cl::init(8), cl::Hidden);
 
+static cl::opt<bool>
+WriteStat("write-stat",
+    cl::desc("Write stat"),
+    cl::init(true), cl::Hidden);
+
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
 
@@ -569,6 +574,8 @@ private:
   /// maybe suboptimal splitting
   void maybeSuboptimal();
   void maybeSuboptimal(MachineLoop* L, LoopInfoCustom *I);
+
+  void writeStat();
 };
 
 } // end anonymous namespace
@@ -3394,6 +3401,29 @@ void RAGreedy::maybeSuboptimal() {
   }
 }
 
+void RAGreedy::writeStat() {
+  std::string filename = MF->getFunction().getParent()->getModuleIdentifier() + "." + std::to_string(MF->getFunctionNumber()) + ".txt";
+  std::ofstream f(filename);
+
+  f << MinRound << "\n";
+  f << Round << "\n";
+  f << MinSpillCost << "\n";
+  f << calcPotentialSpillCosts() << "\n";
+  if (OnlyThreshold) {
+    if (Threshold == 10U) f << (MinSpillCost < calcPotentialSpillCosts() * Hysteresis) << "\n";
+    else f << (MinSpillCost < calcPotentialSpillCosts() * 0.1 * Threshold) << "\n";
+  } else {
+    f << (MaybeSuboptimal &&
+        ((MinSpillCost < calcPotentialSpillCosts() * 0.90 && calcPotentialSpillCosts() > 100) ||
+        (MinSpillCost < calcPotentialSpillCosts() * 0.80 && 50 <= calcPotentialSpillCosts() && calcPotentialSpillCosts() < 100))) << "\n";
+  }
+  f << MF->getFunction().getParent()->getModuleIdentifier() << "\n";
+  f << MF->getName().str() << "\n";
+  f << SplitCanCauseEvictionChain << "\n";
+  f << SplitCanCauseLocalSpill << "\n";
+  f.close();
+}
+
 bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   // NamedRegionTimer T("total", "Total", TimerGroupName, TimerGroupDescription, true);
   LLVM_DEBUG(dbgs() << "********** GREEDY REGISTER ALLOCATION **********\n"
@@ -3480,6 +3510,9 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
     MF->verify(this, "Before post optimization");
 
   postOptimization();
+
+  if (WriteStat)
+    writeStat();
 
   if (!isPBQP)
     reportNumberOfSplillsReloads();
