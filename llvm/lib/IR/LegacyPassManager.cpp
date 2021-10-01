@@ -1472,7 +1472,7 @@ bool FPPassManager::runOnFunction(Function &F) {
         if (F.skip) {
           ValueToValueMapTy VMap;
           auto *ClonedFunc = CloneFunction(&F, VMap);
-          replaceFunctionCalls(F, *ClonedFunc);
+          // replaceFunctionCalls(F, *ClonedFunc);
           // In order to preserve function order, we move Clone after old Function
           ClonedFunc->removeFromParent();
           M.getFunctionList().insertAfter(F.getIterator(), ClonedFunc);
